@@ -37,6 +37,8 @@
 typedef struct listNode {
     struct listNode *prev;
     struct listNode *next;
+    //节点的数值为空指针，这样可以指向不同数据结构，使代码更加灵活。
+    //而对不同的数据结构的操作通过list结构中的函数来进行。
     void *value;
 } listNode;
 
