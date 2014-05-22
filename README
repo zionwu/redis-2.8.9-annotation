@@ -1,3 +1,11 @@
+This is the redis 2.8.9 source code.
+
+Through my learning of redis source code, I will add annotion in the code under src directory.
+
+Hopefully, this will help those who are interested in learning redis.
+
+
+
 Where to find complete Redis documentation?
 -------------------------------------------
 
