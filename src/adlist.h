@@ -33,12 +33,14 @@
 
 /* Node, List, and Iterator are the only data structures used currently. */
 
+//双向链表的节点
 typedef struct listNode {
     struct listNode *prev;
     struct listNode *next;
     void *value;
 } listNode;
 
+//迭代器
 typedef struct listIter {
     listNode *next;
     int direction;
@@ -47,8 +49,11 @@ typedef struct listIter {
 typedef struct list {
     listNode *head;
     listNode *tail;
+    //函数指针，指向复制节点中值的函数
     void *(*dup)(void *ptr);
+    //函数指针，指向释放节点中值内存的函数
     void (*free)(void *ptr);
+    //函数指针，指向比较节点中值的函数
     int (*match)(void *ptr, void *key);
     unsigned long len;
 } list;
