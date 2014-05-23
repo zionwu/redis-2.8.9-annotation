@@ -33,38 +33,39 @@
 #include <stdint.h>
 
 /**
- * intset是内存映射的数据结构。使用它是为了更高效使用内存，减少使用struct等数据结构带来的overhead
- * 顾名思义，它对intset中得content指向的内存区域中的数据进行操作。数据是16或者32位或者64位的int。
+ * intset是内存映射的数据结构，存放着有序的整数集。
+ * 使用它是为了更高效使用内存，减少使用struct等数据结构带来的overhead
+ * 整数的类型是16位或者32位或者64位的int。
  */
 
 typedef struct intset {
-    uint32_t encoding; //编码，即content中数据得类型，有16或者32位或者64位的int三种
-    uint32_t length;   //content中int的个数
-    int8_t contents[]; //指向存放数据的内存
+    uint32_t encoding; //整数集的元素编码，有16或者32位或者64位的int三种
+    uint32_t length;   //整数集的元素个数
+    int8_t contents[]; //指向整数集的内存
 } intset;
 
 //创建一个新得intset
 intset *intsetNew(void);
 
-//将value添加到is中
+//将value添加到整数集中
 intset *intsetAdd(intset *is, int64_t value, uint8_t *success);
 
-//将value从is中删除
+//将value从整数集中删除
 intset *intsetRemove(intset *is, int64_t value, int *success);
 
-//value是否在is中
+//value是否在整数集中
 uint8_t intsetFind(intset *is, int64_t value);
 
-//插入一个随机数
+//随机取到一个元素
 int64_t intsetRandom(intset *is);
 
-//根据pos找到is中对应得值
+//根据pos找到整数集中对应得值
 uint8_t intsetGet(intset *is, uint32_t pos, int64_t *value);
 
-//返回is中int的个数
+//返回整数集的元素个数
 uint32_t intsetLen(intset *is);
 
-//返回is的字节数
+//返回整数集的字节数
 size_t intsetBlobLen(intset *is);
 
 #endif // __INTSET_H
