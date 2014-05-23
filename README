@@ -1,8 +1,6 @@
-This is the redis 2.8.9 source code.
+This is the redis 2.8.9 source code. Through my learning of redis source code, I will add annotion in the code under src directory. Hopefully, this will help those who are interested in learning redis.
 
-Through my learning of redis source code, I will add annotion in the code under src directory.
-
-Hopefully, this will help those who are interested in learning redis.
+这是redis 2.8.9的源代码。在我学习的过程中，我将在源代码中添加注释。希望能够帮助到其他对redis感兴趣的人。
 
 
 
