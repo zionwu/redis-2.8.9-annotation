@@ -32,19 +32,39 @@
 #define __INTSET_H
 #include <stdint.h>
 
+/**
+ * intset是内存映射的数据结构。使用它是为了更高效使用内存，减少使用struct等数据结构带来的overhead
+ * 顾名思义，它对intset中得content指向的内存区域中的数据进行操作。数据是16或者32位或者64位的int。
+ */
+
 typedef struct intset {
-    uint32_t encoding;
-    uint32_t length;
-    int8_t contents[];
+    uint32_t encoding; //编码，即content中数据得类型，有16或者32位或者64位的int三种
+    uint32_t length;   //content中int的个数
+    int8_t contents[]; //指向存放数据的内存
 } intset;
 
+//创建一个新得intset
 intset *intsetNew(void);
+
+//将value添加到is中
 intset *intsetAdd(intset *is, int64_t value, uint8_t *success);
+
+//将value从is中删除
 intset *intsetRemove(intset *is, int64_t value, int *success);
+
+//value是否在is中
 uint8_t intsetFind(intset *is, int64_t value);
+
+//插入一个随机数
 int64_t intsetRandom(intset *is);
+
+//根据pos找到is中对应得值
 uint8_t intsetGet(intset *is, uint32_t pos, int64_t *value);
+
+//返回is中int的个数
 uint32_t intsetLen(intset *is);
+
+//返回is的字节数
 size_t intsetBlobLen(intset *is);
 
 #endif // __INTSET_H
