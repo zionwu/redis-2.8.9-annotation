@@ -46,6 +46,8 @@
 
 /* Toggle the 16 bit unsigned integer pointed by *p from little endian to
  * big endian */
+
+//将p所指内存的endian反转。即如果原来是big endian,转换后为little endian。反之原来是little endian,转换后为big endian。
 void memrev16(void *p) {
     unsigned char *x = p, t;
 
@@ -56,6 +58,7 @@ void memrev16(void *p) {
 
 /* Toggle the 32 bit unsigned integer pointed by *p from little endian to
  * big endian */
+//将p所指内存的endian反转。即如果原来是big endian,转换后为little endian。反之原来是little endian,转换后为big endian。
 void memrev32(void *p) {
     unsigned char *x = p, t;
 
@@ -69,6 +72,7 @@ void memrev32(void *p) {
 
 /* Toggle the 64 bit unsigned integer pointed by *p from little endian to
  * big endian */
+//将p所指内存的endian反转。即如果原来是big endian,转换后为little endian。反之原来是little endian,转换后为big endian。
 void memrev64(void *p) {
     unsigned char *x = p, t;
 

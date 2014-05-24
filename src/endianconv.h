@@ -36,6 +36,10 @@
 #include "config.h"
 #include <stdint.h>
 
+/**
+ * 将big endian的内存/整数转换为little endian的内存/整数的函数
+ */
+
 void memrev16(void *p);
 void memrev32(void *p);
 void memrev64(void *p);
@@ -45,6 +49,7 @@ uint64_t intrev64(uint64_t v);
 
 /* variants of the function doing the actual convertion only if the target
  * host is big endian */
+//本来就是little endian的系统，函数调用实际上什么都不做
 #if (BYTE_ORDER == LITTLE_ENDIAN)
 #define memrev16ifbe(p)
 #define memrev32ifbe(p)
@@ -53,6 +58,7 @@ uint64_t intrev64(uint64_t v);
 #define intrev32ifbe(v) (v)
 #define intrev64ifbe(v) (v)
 #else
+//big endian的系统，调用后将以little endian表示。
 #define memrev16ifbe(p) memrev16(p)
 #define memrev32ifbe(p) memrev32(p)
 #define memrev64ifbe(p) memrev64(p)
