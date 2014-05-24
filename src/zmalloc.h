@@ -28,6 +28,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * 使用不同的内存分配的库。在编译时可以指定想要使用的库。
+ * 有三种，分别是tcmalloc，jemalloc以及标准的malloc。
+ *
+ * 在调用库函数基础上，记录了分配内存的大小。
+ */
+
 #ifndef __ZMALLOC_H
 #define __ZMALLOC_H
 

@@ -44,6 +44,7 @@ void zlibc_free(void *ptr) {
 #include "config.h"
 #include "zmalloc.h"
 
+//PREFIX_SIZE是每次分配内存时额外分配的大小，用来保存当次内存分配的大小
 #ifdef HAVE_MALLOC_SIZE
 #define PREFIX_SIZE (0)
 #else
@@ -54,6 +55,7 @@ void zlibc_free(void *ptr) {
 #endif
 #endif
 
+//使用tcmalloc/jemalloc的函数替换标准的函数
 /* Explicitly override malloc/free etc when using tcmalloc. */
 #if defined(USE_TCMALLOC)
 #define malloc(size) tc_malloc(size)
@@ -67,6 +69,8 @@ void zlibc_free(void *ptr) {
 #define free(ptr) je_free(ptr)
 #endif
 
+
+//根据是否有原子性来定义函数，没有的话就使用mutex来实现函数的原子性
 #ifdef HAVE_ATOMIC
 #define update_zmalloc_stat_add(__n) __sync_add_and_fetch(&used_memory, (__n))
 #define update_zmalloc_stat_sub(__n) __sync_sub_and_fetch(&used_memory, (__n))
@@ -105,10 +109,11 @@ void zlibc_free(void *ptr) {
     } \
 } while(0)
 
-static size_t used_memory = 0;
-static int zmalloc_thread_safe = 0;
+static size_t used_memory = 0; //记录了使用了的内存
+static int zmalloc_thread_safe = 0; //是否保证线程安全
 pthread_mutex_t used_memory_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+//内存不足时的处理函数
 static void zmalloc_default_oom(size_t size) {
     fprintf(stderr, "zmalloc: Out of memory trying to allocate %zu bytes\n",
         size);
@@ -122,10 +127,12 @@ void *zmalloc(size_t size) {
     void *ptr = malloc(size+PREFIX_SIZE);
 
     if (!ptr) zmalloc_oom_handler(size);
+//定义了HAVE_MALLOC_SIZE则使用zmalloc_size取到分配内存的大小
 #ifdef HAVE_MALLOC_SIZE
     update_zmalloc_stat_alloc(zmalloc_size(ptr));
     return ptr;
 #else
+//否则将分配的大小size保存
     *((size_t*)ptr) = size;
     update_zmalloc_stat_alloc(size+PREFIX_SIZE);
     return (char*)ptr+PREFIX_SIZE;
@@ -178,6 +185,7 @@ void *zrealloc(void *ptr, size_t size) {
 /* Provide zmalloc_size() for systems where this function is not provided by
  * malloc itself, given that in that case we store a header with this
  * information as the first bytes of every allocation. */
+//如果系统没有定义zmalloc_size的函数，那么自定义一个。使用的是多分配的内存来保存内存块的大小
 #ifndef HAVE_MALLOC_SIZE
 size_t zmalloc_size(void *ptr) {
     void *realptr = (char*)ptr-PREFIX_SIZE;
@@ -207,6 +215,7 @@ void zfree(void *ptr) {
 #endif
 }
 
+//将s的值复制到新的内存区域
 char *zstrdup(const char *s) {
     size_t l = strlen(s)+1;
     char *p = zmalloc(l);
