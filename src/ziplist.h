@@ -31,16 +31,46 @@
 #define ZIPLIST_HEAD 0
 #define ZIPLIST_TAIL 1
 
+/**
+ * ziplist也是一种内存数据结构。里面存放的值可以是string或者是不同类型的int。
+ * 具体的解释可参照.c文件中的注释。
+ */
+
+//创建一个新的ziplist
 unsigned char *ziplistNew(void);
+
+//在ziplist的表头或者表尾（根据where）插入新的元素
 unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int slen, int where);
+
+//根据index的值取到ziplist中元素
 unsigned char *ziplistIndex(unsigned char *zl, int index);
+
+//取到p的下一个元素
 unsigned char *ziplistNext(unsigned char *zl, unsigned char *p);
+
+//取到p的上一个元素
 unsigned char *ziplistPrev(unsigned char *zl, unsigned char *p);
+
+//取到p元素中的值
 unsigned int ziplistGet(unsigned char *p, unsigned char **sval, unsigned int *slen, long long *lval);
+
+//在p元素前插入新的元素
 unsigned char *ziplistInsert(unsigned char *zl, unsigned char *p, unsigned char *s, unsigned int slen);
+
+//从ziplist中删除p元素
 unsigned char *ziplistDelete(unsigned char *zl, unsigned char **p);
+
+//删除index处的元素开始的num个元素
 unsigned char *ziplistDeleteRange(unsigned char *zl, unsigned int index, unsigned int num);
+
+//比较p元素的值与s的值
 unsigned int ziplistCompare(unsigned char *p, unsigned char *s, unsigned int slen);
+
+//找到p之后与vstr值一样的元素，每次比较后移动skip个元素
 unsigned char *ziplistFind(unsigned char *p, unsigned char *vstr, unsigned int vlen, unsigned int skip);
+
+//返回ziplist中元素个数
 unsigned int ziplistLen(unsigned char *zl);
+
+//返回ziplist占用内存大小
 size_t ziplistBlobLen(unsigned char *zl);
