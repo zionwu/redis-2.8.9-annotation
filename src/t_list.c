@@ -34,10 +34,15 @@ void signalListAsReady(redisClient *c, robj *key);
 /*-----------------------------------------------------------------------------
  * List API
  *----------------------------------------------------------------------------*/
+//这是redis业务逻辑中使用的list的API接口。list的底层实现可以是ziplist或者adlist.
+//一开始使用ziplist,当新的元素大于ziplist所能容纳的值，或者ziplist的元素数量大于规定的值
+//就将ziplist转变成adlist。
+
 
 /* Check the argument length to see if it requires us to convert the ziplist
  * to a real list. Only check raw-encoded objects because integer encoded
  * objects are never too long. */
+//将ziplist转换为adlist如果ziplist中保存的值过长
 void listTypeTryConversion(robj *subject, robj *value) {
     if (subject->encoding != REDIS_ENCODING_ZIPLIST) return;
     if (value->encoding == REDIS_ENCODING_RAW &&
@@ -50,19 +55,23 @@ void listTypeTryConversion(robj *subject, robj *value) {
  *
  * There is no need for the caller to increment the refcount of 'value' as
  * the function takes care of it if needed. */
+//根据where的值在表头或者表尾插入新的元素
 void listTypePush(robj *subject, robj *value, int where) {
     /* Check if we need to convert the ziplist */
     listTypeTryConversion(subject,value);
     if (subject->encoding == REDIS_ENCODING_ZIPLIST &&
         ziplistLen(subject->ptr) >= server.list_max_ziplist_entries)
+    	//ziplist的元素数量超过list_max_ziplist_entries时，将其转化为adlist
             listTypeConvert(subject,REDIS_ENCODING_LINKEDLIST);
 
     if (subject->encoding == REDIS_ENCODING_ZIPLIST) {
+    	//将元素插入ziplist中
         int pos = (where == REDIS_HEAD) ? ZIPLIST_HEAD : ZIPLIST_TAIL;
         value = getDecodedObject(value);
         subject->ptr = ziplistPush(subject->ptr,value->ptr,sdslen(value->ptr),pos);
         decrRefCount(value);
     } else if (subject->encoding == REDIS_ENCODING_LINKEDLIST) {
+    	//将元素插入adlist中
         if (where == REDIS_HEAD) {
             listAddNodeHead(subject->ptr,value);
         } else {
@@ -74,9 +83,11 @@ void listTypePush(robj *subject, robj *value, int where) {
     }
 }
 
+//从表头或者表尾取出元素
 robj *listTypePop(robj *subject, int where) {
     robj *value = NULL;
     if (subject->encoding == REDIS_ENCODING_ZIPLIST) {
+    	//调用ziplist API取出值，并将该元素从中删除
         unsigned char *p;
         unsigned char *vstr;
         unsigned int vlen;
@@ -93,6 +104,7 @@ robj *listTypePop(robj *subject, int where) {
             subject->ptr = ziplistDelete(subject->ptr,&p);
         }
     } else if (subject->encoding == REDIS_ENCODING_LINKEDLIST) {
+    	//调用adlist API取出值，并将该元素从中删除
         list *list = subject->ptr;
         listNode *ln;
         if (where == REDIS_HEAD) {
@@ -111,6 +123,7 @@ robj *listTypePop(robj *subject, int where) {
     return value;
 }
 
+//list中元素的数量
 unsigned long listTypeLength(robj *subject) {
     if (subject->encoding == REDIS_ENCODING_ZIPLIST) {
         return ziplistLen(subject->ptr);
@@ -122,6 +135,7 @@ unsigned long listTypeLength(robj *subject) {
 }
 
 /* Initialize an iterator at the specified index. */
+//根据给定的index和direction创建迭代器
 listTypeIterator *listTypeInitIterator(robj *subject, long index, unsigned char direction) {
     listTypeIterator *li = zmalloc(sizeof(listTypeIterator));
     li->subject = subject;
@@ -138,6 +152,7 @@ listTypeIterator *listTypeInitIterator(robj *subject, long index, unsigned char 
 }
 
 /* Clean up the iterator. */
+//释放迭代器的内存
 void listTypeReleaseIterator(listTypeIterator *li) {
     zfree(li);
 }
@@ -145,6 +160,7 @@ void listTypeReleaseIterator(listTypeIterator *li) {
 /* Stores pointer to current the entry in the provided entry structure
  * and advances the position of the iterator. Returns 1 when the current
  * entry is in fact an entry, 0 otherwise. */
+//将当前迭代器指向元素的值保存，并指向下一个元素
 int listTypeNext(listTypeIterator *li, listTypeEntry *entry) {
     /* Protect from converting when iterating */
     redisAssert(li->subject->encoding == li->encoding);
@@ -175,6 +191,7 @@ int listTypeNext(listTypeIterator *li, listTypeEntry *entry) {
 }
 
 /* Return entry or NULL at the current position of the iterator. */
+//取到entry保存的元素的值
 robj *listTypeGet(listTypeEntry *entry) {
     listTypeIterator *li = entry->li;
     robj *value = NULL;
@@ -200,18 +217,22 @@ robj *listTypeGet(listTypeEntry *entry) {
     return value;
 }
 
+//将value插入到entry所指元素的后面或者前面
 void listTypeInsert(listTypeEntry *entry, robj *value, int where) {
     robj *subject = entry->li->subject;
     if (entry->li->encoding == REDIS_ENCODING_ZIPLIST) {
         value = getDecodedObject(value);
         if (where == REDIS_TAIL) {
+        	//取到entry的下一个元素
             unsigned char *next = ziplistNext(subject->ptr,entry->zi);
 
             /* When we insert after the current element, but the current element
              * is the tail of the list, we need to do a push. */
             if (next == NULL) {
+            	//空的话就将value插入到表尾
                 subject->ptr = ziplistPush(subject->ptr,value->ptr,sdslen(value->ptr),REDIS_TAIL);
             } else {
+            	//否则将value插入到next前，即entry后
                 subject->ptr = ziplistInsert(subject->ptr,next,value->ptr,sdslen(value->ptr));
             }
         } else {
@@ -231,6 +252,7 @@ void listTypeInsert(listTypeEntry *entry, robj *value, int where) {
 }
 
 /* Compare the given object with the entry at the current position. */
+//比较entry指向元素的值与o中的值
 int listTypeEqual(listTypeEntry *entry, robj *o) {
     listTypeIterator *li = entry->li;
     if (li->encoding == REDIS_ENCODING_ZIPLIST) {
@@ -244,6 +266,7 @@ int listTypeEqual(listTypeEntry *entry, robj *o) {
 }
 
 /* Delete the element pointed to. */
+//删除entry指向的元素
 void listTypeDelete(listTypeEntry *entry) {
     listTypeIterator *li = entry->li;
     if (li->encoding == REDIS_ENCODING_ZIPLIST) {
@@ -268,6 +291,7 @@ void listTypeDelete(listTypeEntry *entry) {
     }
 }
 
+//将ziplist转换为adlist
 void listTypeConvert(robj *subject, int enc) {
     listTypeIterator *li;
     listTypeEntry entry;
@@ -293,22 +317,30 @@ void listTypeConvert(robj *subject, int enc) {
 /*-----------------------------------------------------------------------------
  * List Commands
  *----------------------------------------------------------------------------*/
+//接下来的API是redis不同的命令的实现
 
+
+//将命令中的元素添加到命令中的list中
 void pushGenericCommand(redisClient *c, int where) {
     int j, waiting = 0, pushed = 0;
+
+    //从db中找到指定的列表
     robj *lobj = lookupKeyWrite(c->db,c->argv[1]);
     int may_have_waiting_clients = (lobj == NULL);
 
     if (lobj && lobj->type != REDIS_LIST) {
+    	//TODO: understand this
         addReply(c,shared.wrongtypeerr);
         return;
     }
 
+    //TODO: understand this
     if (may_have_waiting_clients) signalListAsReady(c,c->argv[1]);
 
     for (j = 2; j < c->argc; j++) {
         c->argv[j] = tryObjectEncoding(c->argv[j]);
         if (!lobj) {
+        	//如果列表还不存在，则创建一个ziplist并将其添加到db中
             lobj = createZiplistObject();
             dbAdd(c->db,c->argv[1],lobj);
         }
@@ -318,31 +350,36 @@ void pushGenericCommand(redisClient *c, int where) {
     addReplyLongLong(c, waiting + (lobj ? listTypeLength(lobj) : 0));
     if (pushed) {
         char *event = (where == REDIS_HEAD) ? "lpush" : "rpush";
-
+        //TODO: understand this
         signalModifiedKey(c->db,c->argv[1]);
         notifyKeyspaceEvent(REDIS_NOTIFY_LIST,event,c->argv[1],c->db->id);
     }
     server.dirty += pushed;
 }
 
+//lpush命令的实现
 void lpushCommand(redisClient *c) {
     pushGenericCommand(c,REDIS_HEAD);
 }
 
+//rpush命令的实现
 void rpushCommand(redisClient *c) {
     pushGenericCommand(c,REDIS_TAIL);
 }
 
+//实现了lpushx/rpushx/linsert命令
 void pushxGenericCommand(redisClient *c, robj *refval, robj *val, int where) {
     robj *subject;
     listTypeIterator *iter;
     listTypeEntry entry;
     int inserted = 0;
 
+    //TODO
     if ((subject = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
         checkType(c,subject,REDIS_LIST)) return;
 
     if (refval != NULL) {
+    	//对linsert的实现
         /* We're not sure if this value can be inserted yet, but we cannot
          * convert the list inside the iterator. We don't want to loop over
          * the list twice (once to see if the value can be inserted and once
@@ -387,16 +424,19 @@ void pushxGenericCommand(redisClient *c, robj *refval, robj *val, int where) {
     addReplyLongLong(c,listTypeLength(subject));
 }
 
+//lpushx命令的实现
 void lpushxCommand(redisClient *c) {
     c->argv[2] = tryObjectEncoding(c->argv[2]);
     pushxGenericCommand(c,NULL,c->argv[2],REDIS_HEAD);
 }
 
+//rpushx命令的实现
 void rpushxCommand(redisClient *c) {
     c->argv[2] = tryObjectEncoding(c->argv[2]);
     pushxGenericCommand(c,NULL,c->argv[2],REDIS_TAIL);
 }
 
+//linsert命令的实现
 void linsertCommand(redisClient *c) {
     c->argv[4] = tryObjectEncoding(c->argv[4]);
     if (strcasecmp(c->argv[2]->ptr,"after") == 0) {
@@ -408,12 +448,14 @@ void linsertCommand(redisClient *c) {
     }
 }
 
+//llen命令的实现
 void llenCommand(redisClient *c) {
     robj *o = lookupKeyReadOrReply(c,c->argv[1],shared.czero);
     if (o == NULL || checkType(c,o,REDIS_LIST)) return;
     addReplyLongLong(c,listTypeLength(o));
 }
 
+//lindex命令的实现
 void lindexCommand(redisClient *c) {
     robj *o = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk);
     if (o == NULL || checkType(c,o,REDIS_LIST)) return;
