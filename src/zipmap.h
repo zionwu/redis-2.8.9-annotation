@@ -32,18 +32,39 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+//zipmap也是一种内存数据结构，存放的是key和value。详细解释参照.c文件中注释。
+
 #ifndef _ZIPMAP_H
 #define _ZIPMAP_H
 
+//构造一个新的zipmap
 unsigned char *zipmapNew(void);
+
+//在zipmap中添加一个新的key/value, 如果key存在则更新旧的值
 unsigned char *zipmapSet(unsigned char *zm, unsigned char *key, unsigned int klen, unsigned char *val, unsigned int vlen, int *update);
+
+//从zipmap中删除给定key对应的entry
 unsigned char *zipmapDel(unsigned char *zm, unsigned char *key, unsigned int klen, int *deleted);
+
+//回到zipmap的开头
 unsigned char *zipmapRewind(unsigned char *zm);
+
+//将zm当前指向的entry的值取出，并且返回指向下一个entry的指针
 unsigned char *zipmapNext(unsigned char *zm, unsigned char **key, unsigned int *klen, unsigned char **value, unsigned int *vlen);
+
+//取到key所指entry的值
 int zipmapGet(unsigned char *zm, unsigned char *key, unsigned int klen, unsigned char **value, unsigned int *vlen);
+
+//检查zipmap中是否存在key
 int zipmapExists(unsigned char *zm, unsigned char *key, unsigned int klen);
+
+//zipmap中entry的数量
 unsigned int zipmapLen(unsigned char *zm);
+
+//zipmap所占用内存字节数
 size_t zipmapBlobLen(unsigned char *zm);
+
+//打印处zipmap中所存数据
 void zipmapRepr(unsigned char *p);
 
 #endif
