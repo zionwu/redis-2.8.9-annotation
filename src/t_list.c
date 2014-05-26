@@ -495,12 +495,15 @@ void lindexCommand(redisClient *c) {
     }
 }
 
+//lset命令的实现
 void lsetCommand(redisClient *c) {
     robj *o = lookupKeyWriteOrReply(c,c->argv[1],shared.nokeyerr);
     if (o == NULL || checkType(c,o,REDIS_LIST)) return;
     long index;
+    //取到value参数
     robj *value = (c->argv[3] = tryObjectEncoding(c->argv[3]));
 
+    //取到index参数
     if ((getLongFromObjectOrReply(c, c->argv[2], &index, NULL) != REDIS_OK))
         return;
 
@@ -511,8 +514,10 @@ void lsetCommand(redisClient *c) {
         if (p == NULL) {
             addReply(c,shared.outofrangeerr);
         } else {
+        	//删掉原来的值
             o->ptr = ziplistDelete(o->ptr,&p);
             value = getDecodedObject(value);
+            //插入新的值
             o->ptr = ziplistInsert(o->ptr,p,value->ptr,sdslen(value->ptr));
             decrRefCount(value);
             addReply(c,shared.ok);
@@ -526,6 +531,7 @@ void lsetCommand(redisClient *c) {
             addReply(c,shared.outofrangeerr);
         } else {
             decrRefCount((robj*)listNodeValue(ln));
+            //对于adlist直接赋新值
             listNodeValue(ln) = value;
             incrRefCount(value);
             addReply(c,shared.ok);
@@ -538,6 +544,7 @@ void lsetCommand(redisClient *c) {
     }
 }
 
+//实现了lpop/rpop命令
 void popGenericCommand(redisClient *c, int where) {
     robj *o = lookupKeyWriteOrReply(c,c->argv[1],shared.nullbulk);
     if (o == NULL || checkType(c,o,REDIS_LIST)) return;
@@ -561,18 +568,22 @@ void popGenericCommand(redisClient *c, int where) {
     }
 }
 
+//lpop命令的实现
 void lpopCommand(redisClient *c) {
     popGenericCommand(c,REDIS_HEAD);
 }
 
+//rpop命令的实现
 void rpopCommand(redisClient *c) {
     popGenericCommand(c,REDIS_TAIL);
 }
 
+//lrange命令的实现
 void lrangeCommand(redisClient *c) {
     robj *o;
     long start, end, llen, rangelen;
 
+    //取到start, end
     if ((getLongFromObjectOrReply(c, c->argv[2], &start, NULL) != REDIS_OK) ||
         (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != REDIS_OK)) return;
 
@@ -581,6 +592,7 @@ void lrangeCommand(redisClient *c) {
     llen = listTypeLength(o);
 
     /* convert negative indexes */
+    //处理负值的情况
     if (start < 0) start = llen+start;
     if (end < 0) end = llen+end;
     if (start < 0) start = 0;
@@ -602,6 +614,7 @@ void lrangeCommand(redisClient *c) {
         unsigned int vlen;
         long long vlong;
 
+        //取到从start到end的值
         while(rangelen--) {
             ziplistGet(p,&vstr,&vlen,&vlong);
             if (vstr) {
@@ -616,6 +629,7 @@ void lrangeCommand(redisClient *c) {
 
         /* If we are nearest to the end of the list, reach the element
          * starting from tail and going backward, as it is faster. */
+        //如果start靠近表尾，则从表尾从前开始找到start所指元素
         if (start > llen/2) start -= llen;
         ln = listIndex(o->ptr,start);
 
@@ -628,12 +642,14 @@ void lrangeCommand(redisClient *c) {
     }
 }
 
+//ltrim命令的实现
 void ltrimCommand(redisClient *c) {
     robj *o;
     long start, end, llen, j, ltrim, rtrim;
     list *list;
     listNode *ln;
 
+    //取到start, end的值
     if ((getLongFromObjectOrReply(c, c->argv[2], &start, NULL) != REDIS_OK) ||
         (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != REDIS_OK)) return;
 
@@ -642,6 +658,7 @@ void ltrimCommand(redisClient *c) {
     llen = listTypeLength(o);
 
     /* convert negative indexes */
+    //处理负值的情况
     if (start < 0) start = llen+start;
     if (end < 0) end = llen+end;
     if (start < 0) start = 0;
@@ -660,14 +677,18 @@ void ltrimCommand(redisClient *c) {
 
     /* Remove list elements to perform the trim */
     if (o->encoding == REDIS_ENCODING_ZIPLIST) {
+    	//删除从0开始的ltrim个元素，即0到start-1
         o->ptr = ziplistDeleteRange(o->ptr,0,ltrim);
+        //删除从-rtrim开始的rtrim个元素，即从end+1 到 llen-1
         o->ptr = ziplistDeleteRange(o->ptr,-rtrim,rtrim);
     } else if (o->encoding == REDIS_ENCODING_LINKEDLIST) {
         list = o->ptr;
+        //删除0到start-1的元素
         for (j = 0; j < ltrim; j++) {
             ln = listFirst(list);
             listDelNode(list,ln);
         }
+        //删除end+1 到 llen-1的元素
         for (j = 0; j < rtrim; j++) {
             ln = listLast(list);
             listDelNode(list,ln);
@@ -677,6 +698,8 @@ void ltrimCommand(redisClient *c) {
     }
 
     notifyKeyspaceEvent(REDIS_NOTIFY_LIST,"ltrim",c->argv[1],c->db->id);
+
+    //list的长度为0时将其从db删掉
     if (listTypeLength(o) == 0) {
         dbDelete(c->db,c->argv[1]);
         notifyKeyspaceEvent(REDIS_NOTIFY_GENERIC,"del",c->argv[1],c->db->id);
@@ -686,6 +709,7 @@ void ltrimCommand(redisClient *c) {
     addReply(c,shared.ok);
 }
 
+//lrem命令的实现
 void lremCommand(redisClient *c) {
     robj *subject, *obj;
     obj = c->argv[3] = tryObjectEncoding(c->argv[3]);
@@ -710,7 +734,7 @@ void lremCommand(redisClient *c) {
     } else {
         li = listTypeInitIterator(subject,0,REDIS_TAIL);
     }
-
+    //从list中删除toremove个等于obj的值
     while (listTypeNext(li,&entry)) {
         if (listTypeEqual(&entry,obj)) {
             listTypeDelete(&entry);
@@ -745,10 +769,11 @@ void lremCommand(redisClient *c) {
  * since the element is not just returned but pushed against another list
  * as well. This command was originally proposed by Ezra Zygmuntowicz.
  */
-
+//将value添加到名字为dstkey的list 对象dstobj中
 void rpoplpushHandlePush(redisClient *c, robj *dstkey, robj *dstobj, robj *value) {
     /* Create the list if the key does not exist */
     if (!dstobj) {
+    	//如果目标list不存在则创建一个新的并加到db中
         dstobj = createZiplistObject();
         dbAdd(c->db,dstkey,dstobj);
         signalListAsReady(c,dstkey);
@@ -760,6 +785,7 @@ void rpoplpushHandlePush(redisClient *c, robj *dstkey, robj *dstobj, robj *value
     addReplyBulk(c,value);
 }
 
+//rpoplpush命令的实现
 void rpoplpushCommand(redisClient *c) {
     robj *sobj, *value;
     if ((sobj = lookupKeyWriteOrReply(c,c->argv[1],shared.nullbulk)) == NULL ||
