@@ -33,7 +33,7 @@
 /*-----------------------------------------------------------------------------
  * String Commands
  *----------------------------------------------------------------------------*/
-
+//检查string长度是否超过512MB
 static int checkStringLength(redisClient *c, long long size) {
     if (size > 512*1024*1024) {
         addReplyError(c,"string exceeds maximum allowed size (512MB)");
@@ -61,28 +61,33 @@ static int checkStringLength(redisClient *c, long long size) {
 #define REDIS_SET_NO_FLAGS 0
 #define REDIS_SET_NX (1<<0)     /* Set if key not exists. */
 #define REDIS_SET_XX (1<<1)     /* Set if key exists. */
-
+//被SET, SETEX, PSETEX, SETNX调用的通用函数
 void setGenericCommand(redisClient *c, int flags, robj *key, robj *val, robj *expire, int unit, robj *ok_reply, robj *abort_reply) {
     long long milliseconds = 0; /* initialized to avoid any harmness warning */
 
     if (expire) {
+	    //去到超时的值
         if (getLongLongFromObjectOrReply(c, expire, &milliseconds, NULL) != REDIS_OK)
             return;
         if (milliseconds <= 0) {
             addReplyError(c,"invalid expire time in SETEX");
             return;
         }
+		//根据unit转换
         if (unit == UNIT_SECONDS) milliseconds *= 1000;
     }
 
     if ((flags & REDIS_SET_NX && lookupKeyWrite(c->db,key) != NULL) ||
         (flags & REDIS_SET_XX && lookupKeyWrite(c->db,key) == NULL))
     {
+	    //如果是setnx但是key存在，或者setxx但是key不存在，报错
         addReply(c, abort_reply ? abort_reply : shared.nullbulk);
         return;
     }
+	//将key的值设为val
     setKey(c->db,key,val);
     server.dirty++;
+	//设定超时
     if (expire) setExpire(c->db,key,mstime()+milliseconds);
     notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"set",key,c->db->id);
     if (expire) notifyKeyspaceEvent(REDIS_NOTIFY_GENERIC,
@@ -91,12 +96,14 @@ void setGenericCommand(redisClient *c, int flags, robj *key, robj *val, robj *ex
 }
 
 /* SET key value [NX] [XX] [EX <seconds>] [PX <milliseconds>] */
+//set命令的实现
 void setCommand(redisClient *c) {
     int j;
     robj *expire = NULL;
     int unit = UNIT_SECONDS;
     int flags = REDIS_SET_NO_FLAGS;
 
+	//根据第三第四个参数取到flags和expire的值
     for (j = 3; j < c->argc; j++) {
         char *a = c->argv[j]->ptr;
         robj *next = (j == c->argc-1) ? NULL : c->argv[j+1];
@@ -124,24 +131,29 @@ void setCommand(redisClient *c) {
     }
 
     c->argv[2] = tryObjectEncoding(c->argv[2]);
+    //调用通用函数
     setGenericCommand(c,flags,c->argv[1],c->argv[2],expire,unit,NULL,NULL);
 }
 
+//setnx命令的实现
 void setnxCommand(redisClient *c) {
     c->argv[2] = tryObjectEncoding(c->argv[2]);
     setGenericCommand(c,REDIS_SET_NX,c->argv[1],c->argv[2],NULL,0,shared.cone,shared.czero);
 }
 
+//setex命令的实现
 void setexCommand(redisClient *c) {
     c->argv[3] = tryObjectEncoding(c->argv[3]);
     setGenericCommand(c,REDIS_SET_NO_FLAGS,c->argv[1],c->argv[3],c->argv[2],UNIT_SECONDS,NULL,NULL);
 }
 
+//psetex命令的实现
 void psetexCommand(redisClient *c) {
     c->argv[3] = tryObjectEncoding(c->argv[3]);
     setGenericCommand(c,REDIS_SET_NO_FLAGS,c->argv[1],c->argv[3],c->argv[2],UNIT_MILLISECONDS,NULL,NULL);
 }
 
+//get的通用函数
 int getGenericCommand(redisClient *c) {
     robj *o;
 
@@ -157,23 +169,29 @@ int getGenericCommand(redisClient *c) {
     }
 }
 
+//get命令的实现
 void getCommand(redisClient *c) {
     getGenericCommand(c);
 }
 
+//getset命令的实现
 void getsetCommand(redisClient *c) {
+    //get失败则返回
     if (getGenericCommand(c) == REDIS_ERR) return;
     c->argv[2] = tryObjectEncoding(c->argv[2]);
+	//set操作
     setKey(c->db,c->argv[1],c->argv[2]);
     notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"set",c->argv[1],c->db->id);
     server.dirty++;
 }
 
+//setrange命令的实现
 void setrangeCommand(redisClient *c) {
     robj *o;
     long offset;
     sds value = c->argv[3]->ptr;
 
+	//取到offset的值
     if (getLongFromObjectOrReply(c,c->argv[2],&offset,NULL) != REDIS_OK)
         return;
 
@@ -182,18 +200,23 @@ void setrangeCommand(redisClient *c) {
         return;
     }
 
+	//找到key对应的obj
     o = lookupKeyWrite(c->db,c->argv[1]);
     if (o == NULL) {
+	//key对应obj不存在
         /* Return 0 when setting nothing on a non-existing string */
         if (sdslen(value) == 0) {
+		    //value的长度为0时返回0
             addReply(c,shared.czero);
             return;
         }
 
         /* Return when the resulting string exceeds allowed size */
+		//改变后的值的长度过长，返回
         if (checkStringLength(c,offset+sdslen(value)) != REDIS_OK)
             return;
 
+		//创建obj
         o = createObject(REDIS_STRING,sdsempty());
         dbAdd(c->db,c->argv[1],o);
     } else {
@@ -206,11 +229,13 @@ void setrangeCommand(redisClient *c) {
         /* Return existing string length when setting nothing */
         olen = stringObjectLen(o);
         if (sdslen(value) == 0) {
+		    //value的长度为0时返回原val的长度
             addReplyLongLong(c,olen);
             return;
         }
 
         /* Return when the resulting string exceeds allowed size */
+		//改变后的值的长度过长，返回
         if (checkStringLength(c,offset+sdslen(value)) != REDIS_OK)
             return;
 
@@ -219,7 +244,9 @@ void setrangeCommand(redisClient *c) {
     }
 
     if (sdslen(value) > 0) {
+	    //重新分配sds的内存
         o->ptr = sdsgrowzero(o->ptr,offset+sdslen(value));
+		//将value的值拷到obj中sds的内存中
         memcpy((char*)o->ptr+offset,value,sdslen(value));
         signalModifiedKey(c->db,c->argv[1]);
         notifyKeyspaceEvent(REDIS_NOTIFY_STRING,
@@ -229,12 +256,14 @@ void setrangeCommand(redisClient *c) {
     addReplyLongLong(c,sdslen(o->ptr));
 }
 
+//getrange命令的实现
 void getrangeCommand(redisClient *c) {
     robj *o;
     long start, end;
     char *str, llbuf[32];
     size_t strlen;
 
+	//取到start, end的值
     if (getLongFromObjectOrReply(c,c->argv[2],&start,NULL) != REDIS_OK)
         return;
     if (getLongFromObjectOrReply(c,c->argv[3],&end,NULL) != REDIS_OK)
@@ -242,6 +271,7 @@ void getrangeCommand(redisClient *c) {
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptybulk)) == NULL ||
         checkType(c,o,REDIS_STRING)) return;
 
+    //取到key对应的string
     if (o->encoding == REDIS_ENCODING_INT) {
         str = llbuf;
         strlen = ll2string(llbuf,sizeof(llbuf),(long)o->ptr);
@@ -251,6 +281,7 @@ void getrangeCommand(redisClient *c) {
     }
 
     /* Convert negative indexes */
+	//处理start，end为负的情况
     if (start < 0) start = strlen+start;
     if (end < 0) end = strlen+end;
     if (start < 0) start = 0;
@@ -266,6 +297,7 @@ void getrangeCommand(redisClient *c) {
     }
 }
 
+//mget命令的实现
 void mgetCommand(redisClient *c) {
     int j;
 
@@ -284,16 +316,19 @@ void mgetCommand(redisClient *c) {
     }
 }
 
+//mset/msetnx命令使用的通用函数
 void msetGenericCommand(redisClient *c, int nx) {
     int j, busykeys = 0;
 
     if ((c->argc % 2) == 0) {
+	    //参数不为key/value成对出现报错
         addReplyError(c,"wrong number of arguments for MSET");
         return;
     }
     /* Handle the NX flag. The MSETNX semantic is to return zero and don't
      * set nothing at all if at least one already key exists. */
     if (nx) {
+	    //如果有一个key存在的话，就不做任何操作
         for (j = 1; j < c->argc; j += 2) {
             if (lookupKeyWrite(c->db,c->argv[j]) != NULL) {
                 busykeys++;
@@ -306,6 +341,7 @@ void msetGenericCommand(redisClient *c, int nx) {
     }
 
     for (j = 1; j < c->argc; j += 2) {
+	    //对所有的key设值
         c->argv[j+1] = tryObjectEncoding(c->argv[j+1]);
         setKey(c->db,c->argv[j],c->argv[j+1]);
         notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"set",c->argv[j],c->db->id);
@@ -314,23 +350,28 @@ void msetGenericCommand(redisClient *c, int nx) {
     addReply(c, nx ? shared.cone : shared.ok);
 }
 
+//mset命令的实现
 void msetCommand(redisClient *c) {
     msetGenericCommand(c,0);
 }
 
+//msetnx命令的实现
 void msetnxCommand(redisClient *c) {
     msetGenericCommand(c,1);
 }
 
+//通用函数，对key对应的值加、减incr。被incr/desc/incrby/descby调用
 void incrDecrCommand(redisClient *c, long long incr) {
     long long value, oldvalue;
     robj *o, *new;
 
     o = lookupKeyWrite(c->db,c->argv[1]);
     if (o != NULL && checkType(c,o,REDIS_STRING)) return;
+	//取到key对应的值
     if (getLongLongFromObjectOrReply(c,o,&value,NULL) != REDIS_OK) return;
 
     oldvalue = value;
+	//如果增减后的值超过最大最小值，报错
     if ((incr < 0 && oldvalue < 0 && incr < (LLONG_MIN-oldvalue)) ||
         (incr > 0 && oldvalue > 0 && incr > (LLONG_MAX-oldvalue))) {
         addReplyError(c,"increment or decrement would overflow");
@@ -339,8 +380,10 @@ void incrDecrCommand(redisClient *c, long long incr) {
     value += incr;
     new = createStringObjectFromLongLong(value);
     if (o)
+	    //o存在则改变它的值
         dbOverwrite(c->db,c->argv[1],new);
     else
+	    //o原来不存在，则创建新的
         dbAdd(c->db,c->argv[1],new);
     signalModifiedKey(c->db,c->argv[1]);
     notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"incrby",c->argv[1],c->db->id);
@@ -350,14 +393,17 @@ void incrDecrCommand(redisClient *c, long long incr) {
     addReply(c,shared.crlf);
 }
 
+//incr命令的实现
 void incrCommand(redisClient *c) {
     incrDecrCommand(c,1);
 }
 
+//decr命令的实现
 void decrCommand(redisClient *c) {
     incrDecrCommand(c,-1);
 }
 
+//incrby命令的实现
 void incrbyCommand(redisClient *c) {
     long long incr;
 
@@ -365,6 +411,7 @@ void incrbyCommand(redisClient *c) {
     incrDecrCommand(c,incr);
 }
 
+//decrby命令的实现
 void decrbyCommand(redisClient *c) {
     long long incr;
 
@@ -372,12 +419,15 @@ void decrbyCommand(redisClient *c) {
     incrDecrCommand(c,-incr);
 }
 
+//incrbyfloat命令的实现
 void incrbyfloatCommand(redisClient *c) {
     long double incr, value;
     robj *o, *new, *aux;
 
     o = lookupKeyWrite(c->db,c->argv[1]);
     if (o != NULL && checkType(c,o,REDIS_STRING)) return;
+	
+	//取到原来的值value和增量的值incr
     if (getLongDoubleFromObjectOrReply(c,o,&value,NULL) != REDIS_OK ||
         getLongDoubleFromObjectOrReply(c,c->argv[2],&incr,NULL) != REDIS_OK)
         return;
@@ -406,6 +456,7 @@ void incrbyfloatCommand(redisClient *c) {
     rewriteClientCommandArgument(c,2,new);
 }
 
+//append命令的实现
 void appendCommand(redisClient *c) {
     size_t totlen;
     robj *o, *append;
@@ -439,6 +490,7 @@ void appendCommand(redisClient *c) {
     addReplyLongLong(c,totlen);
 }
 
+//strlen命令的实现
 void strlenCommand(redisClient *c) {
     robj *o;
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
