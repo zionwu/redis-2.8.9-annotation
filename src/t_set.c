@@ -38,36 +38,43 @@ void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *
 /* Factory method to return a set that *can* hold "value". When the object has
  * an integer-encodable value, an intset will be returned. Otherwise a regular
  * hash table. */
+//创建一个set, 如果值可以表示为longlong,就创建intset,否则创建一个hash table
 robj *setTypeCreate(robj *value) {
     if (isObjectRepresentableAsLongLong(value,NULL) == REDIS_OK)
         return createIntsetObject();
     return createSetObject();
 }
 
+//往set里面添加元素
 int setTypeAdd(robj *subject, robj *value) {
     long long llval;
     if (subject->encoding == REDIS_ENCODING_HT) {
+    	//如果是hash table
         if (dictAdd(subject->ptr,value,NULL) == DICT_OK) {
             incrRefCount(value);
             return 1;
         }
     } else if (subject->encoding == REDIS_ENCODING_INTSET) {
+    	//如果新的值可以加到intset中
         if (isObjectRepresentableAsLongLong(value,&llval) == REDIS_OK) {
             uint8_t success = 0;
             subject->ptr = intsetAdd(subject->ptr,llval,&success);
             if (success) {
                 /* Convert to regular set when the intset contains
                  * too many entries. */
+            	//如果长度大于set_max_intset_entries，转化为hash table
                 if (intsetLen(subject->ptr) > server.set_max_intset_entries)
                     setTypeConvert(subject,REDIS_ENCODING_HT);
                 return 1;
             }
         } else {
+        	//如果值不能加到intset中，将intset转换为hash table
             /* Failed to get integer from object, convert to regular set. */
             setTypeConvert(subject,REDIS_ENCODING_HT);
 
             /* The set *was* an intset and this value is not integer
              * encodable, so dictAdd should always work. */
+            //将新值添加到hash table中
             redisAssertWithInfo(NULL,value,dictAdd(subject->ptr,value,NULL) == DICT_OK);
             incrRefCount(value);
             return 1;
@@ -78,10 +85,12 @@ int setTypeAdd(robj *subject, robj *value) {
     return 0;
 }
 
+//从set中移除给定的值
 int setTypeRemove(robj *setobj, robj *value) {
     long long llval;
     if (setobj->encoding == REDIS_ENCODING_HT) {
         if (dictDelete(setobj->ptr,value) == DICT_OK) {
+        	//需要重新调整大小
             if (htNeedsResize(setobj->ptr)) dictResize(setobj->ptr);
             return 1;
         }
@@ -97,6 +106,7 @@ int setTypeRemove(robj *setobj, robj *value) {
     return 0;
 }
 
+//判断一个元素是否在set中
 int setTypeIsMember(robj *subject, robj *value) {
     long long llval;
     if (subject->encoding == REDIS_ENCODING_HT) {
@@ -111,6 +121,7 @@ int setTypeIsMember(robj *subject, robj *value) {
     return 0;
 }
 
+//创建一个迭代器
 setTypeIterator *setTypeInitIterator(robj *subject) {
     setTypeIterator *si = zmalloc(sizeof(setTypeIterator));
     si->subject = subject;
@@ -125,6 +136,7 @@ setTypeIterator *setTypeInitIterator(robj *subject) {
     return si;
 }
 
+//释放一个迭代器的内存
 void setTypeReleaseIterator(setTypeIterator *si) {
     if (si->encoding == REDIS_ENCODING_HT)
         dictReleaseIterator(si->di);
@@ -142,6 +154,7 @@ void setTypeReleaseIterator(setTypeIterator *si) {
  * When there are no longer elements -1 is returned.
  * Returned objects ref count is not incremented, so this function is
  * copy on write friendly. */
+//取到迭代器中的当前元素，并且指向下一个元素。返回的是取到元素的编码
 int setTypeNext(setTypeIterator *si, robj **objele, int64_t *llele) {
     if (si->encoding == REDIS_ENCODING_HT) {
         dictEntry *de = dictNext(si->di);
@@ -161,6 +174,7 @@ int setTypeNext(setTypeIterator *si, robj **objele, int64_t *llele) {
  *
  * This function is the way to go for write operations where COW is not
  * an issue as the result will be anyway of incrementing the ref count. */
+//不是copy on write版本的setTypeNext
 robj *setTypeNextObject(setTypeIterator *si) {
     int64_t intele;
     robj *objele;
@@ -170,8 +184,10 @@ robj *setTypeNextObject(setTypeIterator *si) {
     switch(encoding) {
         case -1:    return NULL;
         case REDIS_ENCODING_INTSET:
+        	//返回创建的新对象
             return createStringObjectFromLongLong(intele);
         case REDIS_ENCODING_HT:
+        	//增加引用数
             incrRefCount(objele);
             return objele;
         default:
@@ -193,6 +209,7 @@ robj *setTypeNextObject(setTypeIterator *si) {
  * When an object is returned (the set was a real set) the ref count
  * of the object is not incremented so this function can be considered
  * copy on write friendly. */
+//随机返回set中的元素
 int setTypeRandomElement(robj *setobj, robj **objele, int64_t *llele) {
     if (setobj->encoding == REDIS_ENCODING_HT) {
         dictEntry *de = dictGetRandomKey(setobj->ptr);
@@ -205,6 +222,7 @@ int setTypeRandomElement(robj *setobj, robj **objele, int64_t *llele) {
     return setobj->encoding;
 }
 
+//取到set中元素个数
 unsigned long setTypeSize(robj *subject) {
     if (subject->encoding == REDIS_ENCODING_HT) {
         return dictSize((dict*)subject->ptr);
@@ -218,6 +236,7 @@ unsigned long setTypeSize(robj *subject) {
 /* Convert the set to specified encoding. The resulting dict (when converting
  * to a hash table) is presized to hold the number of elements in the original
  * set. */
+//将intset转换为hash table
 void setTypeConvert(robj *setobj, int enc) {
     setTypeIterator *si;
     redisAssertWithInfo(NULL,setobj,setobj->type == REDIS_SET &&
@@ -229,17 +248,20 @@ void setTypeConvert(robj *setobj, int enc) {
         robj *element;
 
         /* Presize the dict to avoid rehashing */
+        //将hash table的长度设为intset的长度
         dictExpand(d,intsetLen(setobj->ptr));
 
         /* To add the elements we extract integers and create redis objects */
         si = setTypeInitIterator(setobj);
         while (setTypeNext(si,NULL,&intele) != -1) {
+        	//将intset中所有元素添加到hash table中
             element = createStringObjectFromLongLong(intele);
             redisAssertWithInfo(NULL,element,dictAdd(d,element,NULL) == DICT_OK);
         }
         setTypeReleaseIterator(si);
 
         setobj->encoding = REDIS_ENCODING_HT;
+        //释放intset占用的内存
         zfree(setobj->ptr);
         setobj->ptr = d;
     } else {
@@ -247,12 +269,15 @@ void setTypeConvert(robj *setobj, int enc) {
     }
 }
 
+
+//sadd命令的实现
 void saddCommand(redisClient *c) {
     robj *set;
     int j, added = 0;
 
     set = lookupKeyWrite(c->db,c->argv[1]);
     if (set == NULL) {
+    	//key对应的set不存在，则创建一个新的，并加到db中
         set = setTypeCreate(c->argv[2]);
         dbAdd(c->db,c->argv[1],set);
     } else {
@@ -263,6 +288,7 @@ void saddCommand(redisClient *c) {
     }
 
     for (j = 2; j < c->argc; j++) {
+    	//添加元素到set中
         c->argv[j] = tryObjectEncoding(c->argv[j]);
         if (setTypeAdd(set,c->argv[j])) added++;
     }
@@ -274,6 +300,7 @@ void saddCommand(redisClient *c) {
     addReplyLongLong(c,added);
 }
 
+//srem命令的实现
 void sremCommand(redisClient *c) {
     robj *set;
     int j, deleted = 0, keyremoved = 0;
@@ -282,9 +309,11 @@ void sremCommand(redisClient *c) {
         checkType(c,set,REDIS_SET)) return;
 
     for (j = 2; j < c->argc; j++) {
+    	//移除指定的值
         if (setTypeRemove(set,c->argv[j])) {
             deleted++;
             if (setTypeSize(set) == 0) {
+            	//set已经为空时，从db删除它
                 dbDelete(c->db,c->argv[1]);
                 keyremoved = 1;
                 break;
@@ -302,6 +331,7 @@ void sremCommand(redisClient *c) {
     addReplyLongLong(c,deleted);
 }
 
+//smove命令的实现
 void smoveCommand(redisClient *c) {
     robj *srcset, *dstset, *ele;
     srcset = lookupKeyWrite(c->db,c->argv[1]);
@@ -309,6 +339,7 @@ void smoveCommand(redisClient *c) {
     ele = c->argv[3] = tryObjectEncoding(c->argv[3]);
 
     /* If the source key does not exist return 0 */
+    //源key不存在
     if (srcset == NULL) {
         addReply(c,shared.czero);
         return;
@@ -316,16 +347,19 @@ void smoveCommand(redisClient *c) {
 
     /* If the source key has the wrong type, or the destination key
      * is set and has the wrong type, return with an error. */
+    //key的类型不是set
     if (checkType(c,srcset,REDIS_SET) ||
         (dstset && checkType(c,dstset,REDIS_SET))) return;
 
     /* If srcset and dstset are equal, SMOVE is a no-op */
+    //源key与目标key是同一个
     if (srcset == dstset) {
         addReply(c,shared.cone);
         return;
     }
 
     /* If the element cannot be removed from the src set, return 0. */
+    //从源key的set中删除元素
     if (!setTypeRemove(srcset,ele)) {
         addReply(c,shared.czero);
         return;
@@ -333,6 +367,7 @@ void smoveCommand(redisClient *c) {
     notifyKeyspaceEvent(REDIS_NOTIFY_SET,"srem",c->argv[1],c->db->id);
 
     /* Remove the src set from the database when empty */
+    //源key的set为空，将它从db中删除
     if (setTypeSize(srcset) == 0) {
         dbDelete(c->db,c->argv[1]);
         notifyKeyspaceEvent(REDIS_NOTIFY_GENERIC,"del",c->argv[1],c->db->id);
@@ -343,11 +378,13 @@ void smoveCommand(redisClient *c) {
 
     /* Create the destination set when it doesn't exist */
     if (!dstset) {
+    	//目标key对应的set不存在则创建一个并加入db中
         dstset = setTypeCreate(ele);
         dbAdd(c->db,c->argv[2],dstset);
     }
 
     /* An extra key has changed when ele was successfully added to dstset */
+    //将元素添加到set中
     if (setTypeAdd(dstset,ele)) {
         server.dirty++;
         notifyKeyspaceEvent(REDIS_NOTIFY_SET,"sadd",c->argv[2],c->db->id);
@@ -355,6 +392,7 @@ void smoveCommand(redisClient *c) {
     addReply(c,shared.cone);
 }
 
+//sismember的命令的实现
 void sismemberCommand(redisClient *c) {
     robj *set;
 
@@ -368,24 +406,30 @@ void sismemberCommand(redisClient *c) {
         addReply(c,shared.czero);
 }
 
+//scard命令的实现
 void scardCommand(redisClient *c) {
     robj *o;
 
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
         checkType(c,o,REDIS_SET)) return;
 
+    //取到set的元素数量，加到回应中
     addReplyLongLong(c,setTypeSize(o));
 }
 
+//spop命令的实现
 void spopCommand(redisClient *c) {
     robj *set, *ele, *aux;
     int64_t llele;
     int encoding;
 
+    //set不存在或者编码不是set
     if ((set = lookupKeyWriteOrReply(c,c->argv[1],shared.nullbulk)) == NULL ||
         checkType(c,set,REDIS_SET)) return;
 
+    //随机取到一个元素
     encoding = setTypeRandomElement(set,&ele,&llele);
+    //根据编码从set中删除
     if (encoding == REDIS_ENCODING_INTSET) {
         ele = createStringObjectFromLongLong(llele);
         set->ptr = intsetRemove(set->ptr,llele,NULL);
@@ -396,12 +440,14 @@ void spopCommand(redisClient *c) {
     notifyKeyspaceEvent(REDIS_NOTIFY_SET,"spop",c->argv[1],c->db->id);
 
     /* Replicate/AOF this command as an SREM operation */
+    //TODO: understand this
     aux = createStringObject("SREM",4);
     rewriteClientCommandVector(c,3,aux,c->argv[1],ele);
     decrRefCount(ele);
     decrRefCount(aux);
 
     addReplyBulk(c,ele);
+    //pop操作后，set为空则从db删除它
     if (setTypeSize(set) == 0) {
         dbDelete(c->db,c->argv[1]);
         notifyKeyspaceEvent(REDIS_NOTIFY_GENERIC,"del",c->argv[1],c->db->id);
@@ -418,6 +464,7 @@ void spopCommand(redisClient *c) {
  * implementation for more info. */
 #define SRANDMEMBER_SUB_STRATEGY_MUL 3
 
+//随机取到set中的多个值
 void srandmemberWithCountCommand(redisClient *c) {
     long l;
     unsigned long count, size;
@@ -434,6 +481,7 @@ void srandmemberWithCountCommand(redisClient *c) {
     } else {
         /* A negative count means: return the same elements multiple times
          * (i.e. don't remove the extracted element after every extraction). */
+    	//当参数l为负，则表示回复的元素可有重复的
         count = -l;
         uniq = 0;
     }
@@ -452,6 +500,7 @@ void srandmemberWithCountCommand(redisClient *c) {
      * "return N random elements" sampling the whole set every time.
      * This case is trivial and can be served without auxiliary data
      * structures. */
+    //当返回的元素可以有重复的，调用setTypeRandomElement随机取到元素并加到回应中
     if (!uniq) {
         addReplyMultiBulkLen(c,count);
         while(count--) {
@@ -468,6 +517,7 @@ void srandmemberWithCountCommand(redisClient *c) {
     /* CASE 2:
      * The number of requested elements is greater than the number of
      * elements inside the set: simply return the whole set. */
+    //当所需元素个数大于set大小，直接返回整个set
     if (count >= size) {
         sunionDiffGenericCommand(c,c->argv+1,1,NULL,REDIS_OP_UNION);
         return;
@@ -485,10 +535,13 @@ void srandmemberWithCountCommand(redisClient *c) {
      * This is done because if the number of requsted elements is just
      * a bit less than the number of elements in the set, the natural approach
      * used into CASE 3 is highly inefficient. */
+    //满足下面的等式，说明所需元素的数量接近set的大小，那么从set中随机删除元素，直到
+    //只有所需数量。这样效率更高
     if (count*SRANDMEMBER_SUB_STRATEGY_MUL > size) {
         setTypeIterator *si;
 
         /* Add all the elements into the temporary dictionary. */
+        //将set中的元素都添加到hash table中
         si = setTypeInitIterator(set);
         while((encoding = setTypeNext(si,&ele,&llele)) != -1) {
             int retval = DICT_ERR;
@@ -507,6 +560,7 @@ void srandmemberWithCountCommand(redisClient *c) {
         redisAssert(dictSize(d) == size);
 
         /* Remove random elements to reach the right count. */
+        //从hash table中随机删除元素，直到大小与指定的一样
         while(size > count) {
             dictEntry *de;
 
@@ -520,6 +574,8 @@ void srandmemberWithCountCommand(redisClient *c) {
      * In this case we can simply get random elements from the set and add
      * to the temporary set, trying to eventually get enough unique elements
      * to reach the specified count. */
+    //当所需元素数目远小于set的大小时，随机从set中取到元素添加到hash table中，
+    //指定hash table的大小为指定大小
     else {
         unsigned long added = 0;
 
@@ -547,6 +603,7 @@ void srandmemberWithCountCommand(redisClient *c) {
         dictIterator *di;
         dictEntry *de;
 
+        //将hash table中的元素添加到应答中
         addReplyMultiBulkLen(c,count);
         di = dictGetIterator(d);
         while((de = dictNext(di)) != NULL)
@@ -556,12 +613,14 @@ void srandmemberWithCountCommand(redisClient *c) {
     }
 }
 
+//srandmember命令的实现
 void srandmemberCommand(redisClient *c) {
     robj *set, *ele;
     int64_t llele;
     int encoding;
 
     if (c->argc == 3) {
+    	//如果两个参数，即key, count，调用srandmemberWithCountCommand
         srandmemberWithCountCommand(c);
         return;
     } else if (c->argc > 3) {
@@ -569,6 +628,7 @@ void srandmemberCommand(redisClient *c) {
         return;
     }
 
+    //否则只随机取一个元素
     if ((set = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk)) == NULL ||
         checkType(c,set,REDIS_SET)) return;
 
@@ -580,18 +640,21 @@ void srandmemberCommand(redisClient *c) {
     }
 }
 
+//比较两个set的大小，s1大时返回正数。使用它的qsort是从小到大排序
 int qsortCompareSetsByCardinality(const void *s1, const void *s2) {
     return setTypeSize(*(robj**)s1)-setTypeSize(*(robj**)s2);
 }
 
 /* This is used by SDIFF and in this case we can receive NULL that should
  * be handled as empty sets. */
+//比较两个set的大小，s1大时返回负数。使用它的qsort是从大到小排序
 int qsortCompareSetsByRevCardinality(const void *s1, const void *s2) {
     robj *o1 = *(robj**)s1, *o2 = *(robj**)s2;
 
     return  (o2 ? setTypeSize(o2) : 0) - (o1 ? setTypeSize(o1) : 0);
 }
 
+//通用函数，为sinterstore/sinter使用
 void sinterGenericCommand(redisClient *c, robj **setkeys, unsigned long setnum, robj *dstkey) {
     robj **sets = zmalloc(sizeof(robj*)*setnum);
     setTypeIterator *si;
@@ -602,10 +665,12 @@ void sinterGenericCommand(redisClient *c, robj **setkeys, unsigned long setnum, 
     int encoding;
 
     for (j = 0; j < setnum; j++) {
+    	//取到setKey[j]对应的set
         robj *setobj = dstkey ?
             lookupKeyWrite(c->db,setkeys[j]) :
             lookupKeyRead(c->db,setkeys[j]);
         if (!setobj) {
+        	//setobj为空时，清理内存后返回
             zfree(sets);
             if (dstkey) {
                 if (dbDelete(c->db,dstkey)) {
@@ -626,6 +691,7 @@ void sinterGenericCommand(redisClient *c, robj **setkeys, unsigned long setnum, 
     }
     /* Sort sets from the smallest to largest, this will improve our
      * algorithm's performance */
+    //根据set的大小排列
     qsort(sets,setnum,sizeof(robj*),qsortCompareSetsByCardinality);
 
     /* The first thing we should output is the total number of elements...
@@ -647,7 +713,9 @@ void sinterGenericCommand(redisClient *c, robj **setkeys, unsigned long setnum, 
     si = setTypeInitIterator(sets[0]);
     while((encoding = setTypeNext(si,&eleobj,&intobj)) != -1) {
         for (j = 1; j < setnum; j++) {
+        	//sets[j]与sets[0]相同是跳过后面步骤
             if (sets[j] == sets[0]) continue;
+            //根据不用编码检查sets[0]中元素intobj是否在set[j]中。不是则跳出循环
             if (encoding == REDIS_ENCODING_INTSET) {
                 /* intset with intset is simple... and fast */
                 if (sets[j]->encoding == REDIS_ENCODING_INTSET &&
@@ -683,14 +751,17 @@ void sinterGenericCommand(redisClient *c, robj **setkeys, unsigned long setnum, 
         }
 
         /* Only take action when all sets contain the member */
+        //j==setnum说明该值在所有set中都存在
         if (j == setnum) {
             if (!dstkey) {
+            	//dstkey不存在，添加元素到回应中
                 if (encoding == REDIS_ENCODING_HT)
                     addReplyBulk(c,eleobj);
                 else
                     addReplyBulkLongLong(c,intobj);
                 cardinality++;
             } else {
+            	//存在则加到set中
                 if (encoding == REDIS_ENCODING_INTSET) {
                     eleobj = createStringObjectFromLongLong(intobj);
                     setTypeAdd(dstset,eleobj);
@@ -727,10 +798,12 @@ void sinterGenericCommand(redisClient *c, robj **setkeys, unsigned long setnum, 
     zfree(sets);
 }
 
+//sinter命令的实现
 void sinterCommand(redisClient *c) {
     sinterGenericCommand(c,c->argv+1,c->argc-1,NULL);
 }
 
+//sinterstore命令的实现
 void sinterstoreCommand(redisClient *c) {
     sinterGenericCommand(c,c->argv+2,c->argc-2,c->argv[1]);
 }
@@ -739,6 +812,7 @@ void sinterstoreCommand(redisClient *c) {
 #define REDIS_OP_DIFF 1
 #define REDIS_OP_INTER 2
 
+//通用函数，为sunion/sdiff/sunionstore/sdiffstore命令所使用
 void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *dstkey, int op) {
     robj **sets = zmalloc(sizeof(robj*)*setnum);
     setTypeIterator *si;
@@ -746,6 +820,7 @@ void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *
     int j, cardinality = 0;
     int diff_algo = 1;
 
+    //取到所有key对应的set
     for (j = 0; j < setnum; j++) {
         robj *setobj = dstkey ?
             lookupKeyWrite(c->db,setkeys[j]) :
@@ -770,9 +845,11 @@ void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *
      * the sets.
      *
      * We compute what is the best bet with the current input here. */
+    //做diff操作
     if (op == REDIS_OP_DIFF && sets[0]) {
         long long algo_one_work = 0, algo_two_work = 0;
 
+        //算法1 O(第一个元素数量×集合数量)，算法2是O(所有集合元素数量和)
         for (j = 0; j < setnum; j++) {
             if (sets[j] == NULL) continue;
 
@@ -783,6 +860,7 @@ void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *
         /* Algorithm 1 has better constant times and performs less operations
          * if there are elements in common. Give it some advantage. */
         algo_one_work /= 2;
+        //选择算法1或者算法2
         diff_algo = (algo_one_work <= algo_two_work) ? 1 : 2;
 
         if (diff_algo == 1 && setnum > 1) {
@@ -802,11 +880,13 @@ void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *
     if (op == REDIS_OP_UNION) {
         /* Union is trivial, just add every element of every set to the
          * temporary set. */
+    	//union操作只需要将所有set的元素都添加到dstset中
         for (j = 0; j < setnum; j++) {
             if (!sets[j]) continue; /* non existing keys are like empty sets */
 
             si = setTypeInitIterator(sets[j]);
             while((ele = setTypeNextObject(si)) != NULL) {
+            	//成功添加，dstset的大小加一
                 if (setTypeAdd(dstset,ele)) cardinality++;
                 decrRefCount(ele);
             }
@@ -821,6 +901,7 @@ void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *
          *
          * This way we perform at max N*M operations, where N is the size of
          * the first set, and M the number of sets. */
+    	//算法1是对sets[0]中每个元素，检查是否在其他set中，否则添加到结果集
         si = setTypeInitIterator(sets[0]);
         while((ele = setTypeNextObject(si)) != NULL) {
             for (j = 1; j < setnum; j++) {
@@ -830,6 +911,7 @@ void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *
             }
             if (j == setnum) {
                 /* There is no other set with this element. Add it. */
+            	//该元素不在其他set中
                 setTypeAdd(dstset,ele);
                 cardinality++;
             }
@@ -844,14 +926,17 @@ void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *
          *
          * This is O(N) where N is the sum of all the elements in every
          * set. */
+    	//算法2是先将sets[0]所有元素添加到结果集。对其他集合的每个元素，尝试从结果集中删除它
         for (j = 0; j < setnum; j++) {
             if (!sets[j]) continue; /* non existing keys are like empty sets */
 
             si = setTypeInitIterator(sets[j]);
             while((ele = setTypeNextObject(si)) != NULL) {
                 if (j == 0) {
+                	//将sets[0]所有元素添加到dstset
                     if (setTypeAdd(dstset,ele)) cardinality++;
                 } else {
+                	//从dstset中删除set[j]中的元素
                     if (setTypeRemove(dstset,ele)) cardinality--;
                 }
                 decrRefCount(ele);
@@ -897,22 +982,27 @@ void sunionDiffGenericCommand(redisClient *c, robj **setkeys, int setnum, robj *
     zfree(sets);
 }
 
+//sunion命令的实现
 void sunionCommand(redisClient *c) {
     sunionDiffGenericCommand(c,c->argv+1,c->argc-1,NULL,REDIS_OP_UNION);
 }
 
+//sunionstore命令的实现
 void sunionstoreCommand(redisClient *c) {
     sunionDiffGenericCommand(c,c->argv+2,c->argc-2,c->argv[1],REDIS_OP_UNION);
 }
 
+//sdiff命令的实现
 void sdiffCommand(redisClient *c) {
     sunionDiffGenericCommand(c,c->argv+1,c->argc-1,NULL,REDIS_OP_DIFF);
 }
 
+//sdiffsore命令的实现
 void sdiffstoreCommand(redisClient *c) {
     sunionDiffGenericCommand(c,c->argv+2,c->argc-2,c->argv[1],REDIS_OP_DIFF);
 }
 
+//sscan命令的实现
 void sscanCommand(redisClient *c) {
     robj *set;
     unsigned long cursor;
@@ -920,5 +1010,6 @@ void sscanCommand(redisClient *c) {
     if (parseScanCursorOrReply(c,c->argv[2],&cursor) == REDIS_ERR) return;
     if ((set = lookupKeyReadOrReply(c,c->argv[1],shared.emptyscan)) == NULL ||
         checkType(c,set,REDIS_SET)) return;
+    //TODO, understand scanGenericCommand in db.c
     scanGenericCommand(c,set,cursor);
 }
