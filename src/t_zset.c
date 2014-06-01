@@ -1187,7 +1187,7 @@ unsigned char *zzlDeleteRangeByRank(unsigned char *zl, unsigned int start, unsig
 /*-----------------------------------------------------------------------------
  * Common sorted set API
  *----------------------------------------------------------------------------*/
-
+//zset中元素个数
 unsigned int zsetLength(robj *zobj) {
     int length = -1;
     if (zobj->encoding == REDIS_ENCODING_ZIPLIST) {
@@ -1200,6 +1200,7 @@ unsigned int zsetLength(robj *zobj) {
     return length;
 }
 
+//将zset的底层数据结构转换为encoding指定的类型
 void zsetConvert(robj *zobj, int encoding) {
     zset *zs;
     zskiplistNode *node, *next;
@@ -1207,6 +1208,8 @@ void zsetConvert(robj *zobj, int encoding) {
     double score;
 
     if (zobj->encoding == encoding) return;
+
+    //将ziplist转换为skiplist
     if (zobj->encoding == REDIS_ENCODING_ZIPLIST) {
         unsigned char *zl = zobj->ptr;
         unsigned char *eptr, *sptr;
@@ -1227,7 +1230,9 @@ void zsetConvert(robj *zobj, int encoding) {
         redisAssertWithInfo(NULL,zobj,sptr != NULL);
 
         while (eptr != NULL) {
+        	//取到score
             score = zzlGetScore(sptr);
+            //取到value
             redisAssertWithInfo(NULL,zobj,ziplistGet(eptr,&vstr,&vlen,&vlong));
             if (vstr == NULL)
                 ele = createStringObjectFromLongLong(vlong);
@@ -1235,7 +1240,9 @@ void zsetConvert(robj *zobj, int encoding) {
                 ele = createStringObject((char*)vstr,vlen);
 
             /* Has incremented refcount since it was just created. */
+            //在skiplist中添加元素
             node = zslInsert(zs->zsl,score,ele);
+            //在dict中添加元素
             redisAssertWithInfo(NULL,zobj,dictAdd(zs->dict,ele,&node->score) == DICT_OK);
             incrRefCount(ele); /* Added to dictionary. */
             zzlNext(zl,&eptr,&sptr);
@@ -1244,7 +1251,9 @@ void zsetConvert(robj *zobj, int encoding) {
         zfree(zobj->ptr);
         zobj->ptr = zs;
         zobj->encoding = REDIS_ENCODING_SKIPLIST;
-    } else if (zobj->encoding == REDIS_ENCODING_SKIPLIST) {
+    }
+    //将skiplist转换为ziplist
+    else if (zobj->encoding == REDIS_ENCODING_SKIPLIST) {
         unsigned char *zl = ziplistNew();
 
         if (encoding != REDIS_ENCODING_ZIPLIST)
@@ -1281,6 +1290,7 @@ void zsetConvert(robj *zobj, int encoding) {
  *----------------------------------------------------------------------------*/
 
 /* This generic command implements both ZADD and ZINCRBY. */
+//通用函数，为zadd和zincrby所使用
 void zaddGenericCommand(redisClient *c, int incr) {
     static char *nanerr = "resulting score is not a number (NaN)";
     robj *key = c->argv[1];
@@ -1301,6 +1311,7 @@ void zaddGenericCommand(redisClient *c, int incr) {
      * either execute fully or nothing at all. */
     scores = zmalloc(sizeof(double)*elements);
     for (j = 0; j < elements; j++) {
+    	//取到命令参数中的score
         if (getDoubleFromObjectOrReply(c,c->argv[2+j*2],&scores[j],NULL)
             != REDIS_OK) goto cleanup;
     }
@@ -1311,8 +1322,10 @@ void zaddGenericCommand(redisClient *c, int incr) {
         if (server.zset_max_ziplist_entries == 0 ||
             server.zset_max_ziplist_value < sdslen(c->argv[3]->ptr))
         {
+        	//如果zset_max_ziplist_entries为0或者ziplist无法存放元素的值，使用skiplist
             zobj = createZsetObject();
         } else {
+        	//使用ziplist
             zobj = createZsetZiplistObject();
         }
         dbAdd(c->db,key,zobj);
@@ -1332,9 +1345,11 @@ void zaddGenericCommand(redisClient *c, int incr) {
             /* Prefer non-encoded element when dealing with ziplists. */
             ele = c->argv[3+j*2];
             if ((eptr = zzlFind(zobj->ptr,ele,&curscore)) != NULL) {
+            	//在zset中找到元素，取到score
                 if (incr) {
                     score += curscore;
                     if (isnan(score)) {
+                    	//新的score是NAN,报错
                         addReplyError(c,nanerr);
                         goto cleanup;
                     }
@@ -1342,6 +1357,7 @@ void zaddGenericCommand(redisClient *c, int incr) {
 
                 /* Remove and re-insert when score changed. */
                 if (score != curscore) {
+                	//score改变了，删除原来的元素，插入新score的元素
                     zobj->ptr = zzlDelete(zobj->ptr,eptr);
                     zobj->ptr = zzlInsert(zobj->ptr,ele,score);
                     server.dirty++;
@@ -1350,10 +1366,13 @@ void zaddGenericCommand(redisClient *c, int incr) {
             } else {
                 /* Optimize: check if the element is too large or the list
                  * becomes too long *before* executing zzlInsert. */
+            	//找不到元素，直接添加新元素
                 zobj->ptr = zzlInsert(zobj->ptr,ele,score);
                 if (zzlLength(zobj->ptr) > server.zset_max_ziplist_entries)
+                	//ziplist元素数量大于zset_max_ziplist_entries，转换为skiplist
                     zsetConvert(zobj,REDIS_ENCODING_SKIPLIST);
                 if (sdslen(ele->ptr) > server.zset_max_ziplist_value)
+                	//ziplist无法保存新元素的值，转换为skiplist
                     zsetConvert(zobj,REDIS_ENCODING_SKIPLIST);
                 server.dirty++;
                 added++;
@@ -1366,6 +1385,7 @@ void zaddGenericCommand(redisClient *c, int incr) {
             ele = c->argv[3+j*2] = tryObjectEncoding(c->argv[3+j*2]);
             de = dictFind(zs->dict,ele);
             if (de != NULL) {
+            	//元素已经存在与zset中
                 curobj = dictGetKey(de);
                 curscore = *(double*)dictGetVal(de);
 
@@ -1383,14 +1403,17 @@ void zaddGenericCommand(redisClient *c, int incr) {
                  * delete the key object from the skiplist, since the
                  * dictionary still has a reference to it. */
                 if (score != curscore) {
+                	//score改变了，删除旧元素，重新插入
                     redisAssertWithInfo(c,curobj,zslDelete(zs->zsl,curscore,curobj));
                     znode = zslInsert(zs->zsl,score,curobj);
                     incrRefCount(curobj); /* Re-inserted in skiplist. */
+                    //更新dict中元素的score
                     dictGetVal(de) = &znode->score; /* Update score ptr. */
                     server.dirty++;
                     updated++;
                 }
             } else {
+            	//元素尚不存在，添加到skiplist和dict中
                 znode = zslInsert(zs->zsl,score,ele);
                 incrRefCount(ele); /* Inserted in skiplist. */
                 redisAssertWithInfo(c,NULL,dictAdd(zs->dict,ele,&znode->score) == DICT_OK);
@@ -1416,14 +1439,17 @@ cleanup:
     }
 }
 
+//zadd命令的实现
 void zaddCommand(redisClient *c) {
     zaddGenericCommand(c,0);
 }
 
+//zincrby命令的实现
 void zincrbyCommand(redisClient *c) {
     zaddGenericCommand(c,1);
 }
 
+//zrem命令的实现
 void zremCommand(redisClient *c) {
     robj *key = c->argv[1];
     robj *zobj;
@@ -1440,7 +1466,10 @@ void zremCommand(redisClient *c) {
                 deleted++;
                 zobj->ptr = zzlDelete(zobj->ptr,eptr);
                 if (zzlLength(zobj->ptr) == 0) {
+                	//zset为空，从db删除它
                     dbDelete(c->db,key);
+                    //bug,忘记将keyremoved设为1了，帮忙加上
+                    keyremoved = 1;
                     break;
                 }
             }
@@ -1451,19 +1480,25 @@ void zremCommand(redisClient *c) {
         double score;
 
         for (j = 2; j < c->argc; j++) {
+        	//从hashtable中找到元素
             de = dictFind(zs->dict,c->argv[j]);
             if (de != NULL) {
                 deleted++;
 
                 /* Delete from the skiplist */
                 score = *(double*)dictGetVal(de);
+                //从skiplist中删除元素
                 redisAssertWithInfo(c,c->argv[j],zslDelete(zs->zsl,score,c->argv[j]));
 
                 /* Delete from the hash table */
+                //从dict中删除元素
                 dictDelete(zs->dict,c->argv[j]);
                 if (htNeedsResize(zs->dict)) dictResize(zs->dict);
                 if (dictSize(zs->dict) == 0) {
+                	//zset为空，从db删除它
                     dbDelete(c->db,key);
+                    //bug,忘记将keyremoved设为1了，帮忙加上
+                    keyremoved = 1;
                     break;
                 }
             }
@@ -1486,6 +1521,8 @@ void zremCommand(redisClient *c) {
 #define ZRANGE_RANK 0
 #define ZRANGE_SCORE 1
 #define ZRANGE_LEX 2
+
+//通用函数，为zemrangebyxxx所调用。
 void zremrangeGenericCommand(redisClient *c, int rangetype) {
     robj *key = c->argv[1];
     robj *zobj;
@@ -1496,6 +1533,7 @@ void zremrangeGenericCommand(redisClient *c, int rangetype) {
     long start, end, llen;
 
     /* Step 1: Parse the range. */
+    //解析参数
     if (rangetype == ZRANGE_RANK) {
         if ((getLongFromObjectOrReply(c,c->argv[2],&start,NULL) != REDIS_OK) ||
             (getLongFromObjectOrReply(c,c->argv[3],&end,NULL) != REDIS_OK))
@@ -1518,6 +1556,7 @@ void zremrangeGenericCommand(redisClient *c, int rangetype) {
 
     if (rangetype == ZRANGE_RANK) {
         /* Sanitize indexes. */
+    	//处理start,end为负的情况
         llen = zsetLength(zobj);
         if (start < 0) start = llen+start;
         if (end < 0) end = llen+end;
@@ -1536,6 +1575,8 @@ void zremrangeGenericCommand(redisClient *c, int rangetype) {
     if (zobj->encoding == REDIS_ENCODING_ZIPLIST) {
         switch(rangetype) {
         case ZRANGE_RANK:
+        	//因为ziplist的函数会操作内存（重新分配内存），所以ziplist内存位置会改变
+        	//因为相关的函数需要返回新的ziplist的内存地址。其他想要改变的变量通过指针作为参数传递
             zobj->ptr = zzlDeleteRangeByRank(zobj->ptr,start+1,end+1,&deleted);
             break;
         case ZRANGE_SCORE:
@@ -1553,6 +1594,7 @@ void zremrangeGenericCommand(redisClient *c, int rangetype) {
         zset *zs = zobj->ptr;
         switch(rangetype) {
         case ZRANGE_RANK:
+        	//与ziplist不同，对于使用struct的数据结构，内存位置不变。
             deleted = zslDeleteRangeByRank(zs->zsl,start+1,end+1,zs->dict);
             break;
         case ZRANGE_SCORE:
@@ -1586,14 +1628,17 @@ cleanup:
     if (rangetype == ZRANGE_LEX) zslFreeLexRange(&lexrange);
 }
 
+//zremrangebyrank命令的实现
 void zremrangebyrankCommand(redisClient *c) {
     zremrangeGenericCommand(c,ZRANGE_RANK);
 }
 
+//zremrangebyscore命令的实现
 void zremrangebyscoreCommand(redisClient *c) {
     zremrangeGenericCommand(c,ZRANGE_SCORE);
 }
 
+//zremrangebylex命令的实现
 void zremrangebylexCommand(redisClient *c) {
     zremrangeGenericCommand(c,ZRANGE_LEX);
 }
@@ -1606,11 +1651,14 @@ typedef struct {
 
     union {
         /* Set iterators. */
+    	//set的迭代器
         union _iterset {
+        	//intset的迭代器
             struct {
                 intset *is;
                 int ii;
             } is;
+            //dict的迭代器
             struct {
                 dict *dict;
                 dictIterator *di;
@@ -1620,10 +1668,12 @@ typedef struct {
 
         /* Sorted set iterators. */
         union _iterzset {
+        	//ziplist的迭代器
             struct {
                 unsigned char *zl;
                 unsigned char *eptr, *sptr;
             } zl;
+            //skiplist的迭代器
             struct {
                 zset *zs;
                 zskiplistNode *node;
@@ -1657,6 +1707,7 @@ typedef struct {
 typedef union _iterset iterset;
 typedef union _iterzset iterzset;
 
+//构建迭代器
 void zuiInitIterator(zsetopsrc *op) {
     if (op->subject == NULL)
         return;
@@ -1693,6 +1744,7 @@ void zuiInitIterator(zsetopsrc *op) {
     }
 }
 
+//清楚op中迭代器的内存
 void zuiClearIterator(zsetopsrc *op) {
     if (op->subject == NULL)
         return;
@@ -1720,6 +1772,8 @@ void zuiClearIterator(zsetopsrc *op) {
     }
 }
 
+
+//迭代器中对应的容器的元素数量
 int zuiLength(zsetopsrc *op) {
     if (op->subject == NULL)
         return 0;
@@ -1750,6 +1804,7 @@ int zuiLength(zsetopsrc *op) {
 /* Check if the current value is valid. If so, store it in the passed structure
  * and move to the next element. If not valid, this means we have reached the
  * end of the structure and can abort. */
+//将迭代器op当前元素的值赋给val, 然后指向下一个元素
 int zuiNext(zsetopsrc *op, zsetopval *val) {
     if (op->subject == NULL)
         return 0;
@@ -1810,6 +1865,7 @@ int zuiNext(zsetopsrc *op, zsetopval *val) {
     return 1;
 }
 
+//将val中ele或者estr中的值转换为ell的整数值
 int zuiLongLongFromValue(zsetopval *val) {
     if (!(val->flags & OPVAL_DIRTY_LL)) {
         val->flags |= OPVAL_DIRTY_LL;
@@ -1835,6 +1891,7 @@ int zuiLongLongFromValue(zsetopval *val) {
     return val->flags & OPVAL_VALID_LL;
 }
 
+//将val中estr或者ell转换为robj
 robj *zuiObjectFromValue(zsetopval *val) {
     if (val->ele == NULL) {
         if (val->estr != NULL) {
@@ -1847,6 +1904,7 @@ robj *zuiObjectFromValue(zsetopval *val) {
     return val->ele;
 }
 
+//将val中的值转换为estr的值
 int zuiBufferFromValue(zsetopval *val) {
     if (val->estr == NULL) {
         if (val->ele != NULL) {
@@ -1869,6 +1927,7 @@ int zuiBufferFromValue(zsetopval *val) {
 
 /* Find value pointed to by val in the source pointer to by op. When found,
  * return 1 and store its score in target. Return 0 otherwise. */
+//在op迭代器指向容器中找到值和val一样的元素。
 int zuiFind(zsetopsrc *op, zsetopval *val, double *score) {
     if (op->subject == NULL)
         return 0;
@@ -1922,6 +1981,7 @@ int zuiFind(zsetopsrc *op, zsetopval *val, double *score) {
     }
 }
 
+//比较两个迭代器指向容器的元素数量大小
 int zuiCompareByCardinality(const void *s1, const void *s2) {
     return zuiLength((zsetopsrc*)s1) - zuiLength((zsetopsrc*)s2);
 }
@@ -1931,6 +1991,7 @@ int zuiCompareByCardinality(const void *s1, const void *s2) {
 #define REDIS_AGGR_MAX 3
 #define zunionInterDictValue(_e) (dictGetVal(_e) == NULL ? 1.0 : *(double*)dictGetVal(_e))
 
+//根据aggregate以不同方式处理val和target
 inline static void zunionInterAggregate(double *target, double val, int aggregate) {
     if (aggregate == REDIS_AGGR_SUM) {
         *target = *target + val;
@@ -1948,6 +2009,7 @@ inline static void zunionInterAggregate(double *target, double val, int aggregat
     }
 }
 
+//通用函数，为zunionstore/zinterstore命令调用
 void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
     int i, j;
     long setnum;
@@ -1972,6 +2034,7 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
     }
 
     /* test if the expected number of keys would overflow */
+    //给定的set的数量与给定的key数量不一样
     if (setnum > c->argc-3) {
         addReply(c,shared.syntaxerr);
         return;
@@ -1979,10 +2042,12 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
 
     /* read keys to be used for input */
     src = zcalloc(sizeof(zsetopsrc) * setnum);
+    //根据给定的key在db找到对应的set
     for (i = 0, j = 3; i < setnum; i++, j++) {
         robj *obj = lookupKeyWrite(c->db,c->argv[j]);
         if (obj != NULL) {
             if (obj->type != REDIS_ZSET && obj->type != REDIS_SET) {
+            	//key对应的类型不是set,zset则报错
                 zfree(src);
                 addReply(c,shared.wrongtypeerr);
                 return;
@@ -2000,13 +2065,16 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
     }
 
     /* parse optional extra arguments */
+    //解析其他参数
     if (j < c->argc) {
         int remaining = c->argc - j;
 
         while (remaining) {
+        	//参数是weigihts的情况
             if (remaining >= (setnum + 1) && !strcasecmp(c->argv[j]->ptr,"weights")) {
                 j++; remaining--;
                 for (i = 0; i < setnum; i++, j++, remaining--) {
+                	//取到每个set的weight的值
                     if (getDoubleFromObjectOrReply(c,c->argv[j],&src[i].weight,
                             "weight value is not a float") != REDIS_OK)
                     {
@@ -2014,7 +2082,9 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
                         return;
                     }
                 }
-            } else if (remaining >= 2 && !strcasecmp(c->argv[j]->ptr,"aggregate")) {
+            }
+            //参数是aggregate的情况
+            else if (remaining >= 2 && !strcasecmp(c->argv[j]->ptr,"aggregate")) {
                 j++; remaining--;
                 if (!strcasecmp(c->argv[j]->ptr,"sum")) {
                     aggregate = REDIS_AGGR_SUM;
@@ -2038,24 +2108,28 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
 
     /* sort sets from the smallest to largest, this will improve our
      * algorithm's performance */
+    //跟据set元素数量大小排序
     qsort(src,setnum,sizeof(zsetopsrc),zuiCompareByCardinality);
 
     dstobj = createZsetObject();
     dstzset = dstobj->ptr;
     memset(&zval, 0, sizeof(zval));
 
+    //zinter的操作
     if (op == REDIS_OP_INTER) {
         /* Skip everything if the smallest input is empty. */
         if (zuiLength(&src[0]) > 0) {
             /* Precondition: as src[0] is non-empty and the inputs are ordered
              * by size, all src[i > 0] are non-empty too. */
             zuiInitIterator(&src[0]);
+            //遍历src[0]这个集合中的元素
             while (zuiNext(&src[0],&zval)) {
                 double score, value;
 
                 score = src[0].weight * zval.score;
                 if (isnan(score)) score = 0;
 
+                //检查该元素是否存在于其他集合中
                 for (j = 1; j < setnum; j++) {
                     /* It is not safe to access the zset we are
                      * iterating, so explicitly check for equal object. */
@@ -2066,12 +2140,15 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
                         value *= src[j].weight;
                         zunionInterAggregate(&score,value,aggregate);
                     } else {
+                    	//如果src[j]不存在这个元素，则跳出循环
                         break;
                     }
                 }
 
                 /* Only continue when present in every input. */
+                //该元素存在于所有集合中
                 if (j == setnum) {
+                	//将元素插入到zset中的skiplist和dict中
                     tmp = zuiObjectFromValue(&zval);
                     znode = zslInsert(dstzset->zsl,score,tmp);
                     incrRefCount(tmp); /* added to skiplist */
@@ -2085,7 +2162,9 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
             }
             zuiClearIterator(&src[0]);
         }
-    } else if (op == REDIS_OP_UNION) {
+    }
+    //sunion的操作
+    else if (op == REDIS_OP_UNION) {
         for (i = 0; i < setnum; i++) {
             if (zuiLength(&src[i]) == 0)
                 continue;
@@ -2095,6 +2174,7 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
                 double score, value;
 
                 /* Skip an element that when already processed */
+                //该元素已经存在与zset中，跳过后续步骤
                 if (dictFind(dstzset->dict,zuiObjectFromValue(&zval)) != NULL)
                     continue;
 
@@ -2106,6 +2186,7 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
                  * exists, since we process every element just one time so
                  * it can't exist in a previous set (otherwise it would be
                  * already processed). */
+                //与后面的集合根据aggregate得到该元素的score值
                 for (j = (i+1); j < setnum; j++) {
                     /* It is not safe to access the zset we are
                      * iterating, so explicitly check for equal object. */
@@ -2118,6 +2199,7 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
                     }
                 }
 
+                //插入到zset中的dict和skiplist中
                 tmp = zuiObjectFromValue(&zval);
                 znode = zslInsert(dstzset->zsl,score,tmp);
                 incrRefCount(zval.ele); /* added to skiplist */
@@ -2134,6 +2216,7 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
         redisPanic("Unknown operator");
     }
 
+    //删除原来dstkey对应的set
     if (dbDelete(c->db,dstkey)) {
         signalModifiedKey(c->db,dstkey);
         touched = 1;
@@ -2141,6 +2224,7 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
     }
     if (dstzset->zsl->length) {
         /* Convert to ziplist when in limits. */
+    	//如果可以，将skiplist转换为ziplist
         if (dstzset->zsl->length <= server.zset_max_ziplist_entries &&
             maxelelen <= server.zset_max_ziplist_value)
                 zsetConvert(dstobj,REDIS_ENCODING_ZIPLIST);
@@ -2161,14 +2245,17 @@ void zunionInterGenericCommand(redisClient *c, robj *dstkey, int op) {
     zfree(src);
 }
 
+//zunionstore命令的实现
 void zunionstoreCommand(redisClient *c) {
     zunionInterGenericCommand(c,c->argv[1], REDIS_OP_UNION);
 }
 
+//zintersrore命令的实现
 void zinterstoreCommand(redisClient *c) {
     zunionInterGenericCommand(c,c->argv[1], REDIS_OP_INTER);
 }
 
+//通用函数，为zrange/zrevrange命令调用
 void zrangeGenericCommand(redisClient *c, int reverse) {
     robj *key = c->argv[1];
     robj *zobj;
@@ -2178,6 +2265,7 @@ void zrangeGenericCommand(redisClient *c, int reverse) {
     int llen;
     int rangelen;
 
+    //取到start,end的值
     if ((getLongFromObjectOrReply(c, c->argv[2], &start, NULL) != REDIS_OK) ||
         (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != REDIS_OK)) return;
 
@@ -2192,6 +2280,7 @@ void zrangeGenericCommand(redisClient *c, int reverse) {
          || checkType(c,zobj,REDIS_ZSET)) return;
 
     /* Sanitize indexes. */
+    //处理start,end为负的情况
     llen = zsetLength(zobj);
     if (start < 0) start = llen+start;
     if (end < 0) end = llen+end;
@@ -2216,6 +2305,7 @@ void zrangeGenericCommand(redisClient *c, int reverse) {
         unsigned int vlen;
         long long vlong;
 
+        //取到第一个元素
         if (reverse)
             eptr = ziplistIndex(zl,-2-(2*start));
         else
@@ -2224,6 +2314,7 @@ void zrangeGenericCommand(redisClient *c, int reverse) {
         redisAssertWithInfo(c,zobj,eptr != NULL);
         sptr = ziplistNext(zl,eptr);
 
+        //去接下来的rangelen个元素
         while (rangelen--) {
             redisAssertWithInfo(c,zobj,eptr != NULL && sptr != NULL);
             redisAssertWithInfo(c,zobj,ziplistGet(eptr,&vstr,&vlen,&vlong));
@@ -2248,6 +2339,7 @@ void zrangeGenericCommand(redisClient *c, int reverse) {
         robj *ele;
 
         /* Check if starting point is trivial, before doing log(N) lookup. */
+        //取到第一个元素
         if (reverse) {
             ln = zsl->tail;
             if (start > 0)
@@ -2258,6 +2350,7 @@ void zrangeGenericCommand(redisClient *c, int reverse) {
                 ln = zslGetElementByRank(zsl,start+1);
         }
 
+        //取接下来的rangelen个元素
         while(rangelen--) {
             redisAssertWithInfo(c,zobj,ln != NULL);
             ele = ln->obj;
@@ -2271,15 +2364,18 @@ void zrangeGenericCommand(redisClient *c, int reverse) {
     }
 }
 
+//zrange命令的实现
 void zrangeCommand(redisClient *c) {
     zrangeGenericCommand(c,0);
 }
 
+//zrevrange命令的实现
 void zrevrangeCommand(redisClient *c) {
     zrangeGenericCommand(c,1);
 }
 
 /* This command implements ZRANGEBYSCORE, ZREVRANGEBYSCORE. */
+//通用函数，为zrangebyscore,zrevrangebyscore命令调用
 void genericZrangebyscoreCommand(redisClient *c, int reverse) {
     zrangespec range;
     robj *key = c->argv[1];
@@ -2299,6 +2395,7 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
         minidx = 2; maxidx = 3;
     }
 
+    //取到range值
     if (zslParseRange(c->argv[minidx],c->argv[maxidx],&range) != REDIS_OK) {
         addReplyError(c,"min or max is not a float");
         return;
@@ -2311,10 +2408,13 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
         int pos = 4;
 
         while (remaining) {
+        	//取到withscores参数
             if (remaining >= 1 && !strcasecmp(c->argv[pos]->ptr,"withscores")) {
                 pos++; remaining--;
                 withscores = 1;
-            } else if (remaining >= 3 && !strcasecmp(c->argv[pos]->ptr,"limit")) {
+            }
+            //取到limit和offset参数
+            else if (remaining >= 3 && !strcasecmp(c->argv[pos]->ptr,"limit")) {
                 if ((getLongFromObjectOrReply(c, c->argv[pos+1], &offset, NULL) != REDIS_OK) ||
                     (getLongFromObjectOrReply(c, c->argv[pos+2], &limit, NULL) != REDIS_OK)) return;
                 pos += 3; remaining -= 3;
@@ -2338,6 +2438,7 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
         double score;
 
         /* If reversed, get the last node in range as starting point. */
+        //取到第一个或者最后一个在range中的元素
         if (reverse) {
             eptr = zzlLastInRange(zl,&range);
         } else {
@@ -2361,6 +2462,7 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
 
         /* If there is an offset, just traverse the number of elements without
          * checking the score because that is done in the next loop. */
+        //先移动offset位置
         while (eptr && offset--) {
             if (reverse) {
                 zzlPrev(zl,&eptr,&sptr);
@@ -2369,13 +2471,16 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
             }
         }
 
+        //取到limit个元素
         while (eptr && limit--) {
             score = zzlGetScore(sptr);
 
             /* Abort when the node is no longer in range. */
             if (reverse) {
+            	//向前移动，则要大于最小值
                 if (!zslValueGteMin(score,&range)) break;
             } else {
+            	//向后移动，则要小于最大值
                 if (!zslValueLteMax(score,&range)) break;
             }
 
@@ -2395,8 +2500,10 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
 
             /* Move to next node */
             if (reverse) {
+            	//往前移动
                 zzlPrev(zl,&eptr,&sptr);
             } else {
+            	//往后移动
                 zzlNext(zl,&eptr,&sptr);
             }
         }
@@ -2406,6 +2513,7 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
         zskiplistNode *ln;
 
         /* If reversed, get the last node in range as starting point. */
+        //取最后一个或最早一个在range的元素作为起始点
         if (reverse) {
             ln = zslLastInRange(zsl,&range);
         } else {
@@ -2425,6 +2533,7 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
 
         /* If there is an offset, just traverse the number of elements without
          * checking the score because that is done in the next loop. */
+        //先移动offset个元素
         while (ln && offset--) {
             if (reverse) {
                 ln = ln->backward;
@@ -2433,11 +2542,14 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
             }
         }
 
+        //取limit个元素
         while (ln && limit--) {
             /* Abort when the node is no longer in range. */
             if (reverse) {
+            	//往前移动，小于最小值时跳出
                 if (!zslValueGteMin(ln->score,&range)) break;
             } else {
+            	//往后移动，大于最大值时跳出
                 if (!zslValueLteMax(ln->score,&range)) break;
             }
 
@@ -2450,8 +2562,10 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
 
             /* Move to next node */
             if (reverse) {
+            	//往前移
                 ln = ln->backward;
             } else {
+            	//往后移
                 ln = ln->level[0].forward;
             }
         }
@@ -2466,14 +2580,17 @@ void genericZrangebyscoreCommand(redisClient *c, int reverse) {
     setDeferredMultiBulkLength(c, replylen, rangelen);
 }
 
+//zrangebyscore命令的实现
 void zrangebyscoreCommand(redisClient *c) {
     genericZrangebyscoreCommand(c,0);
 }
 
+//zrevrangebyscore命令的实现
 void zrevrangebyscoreCommand(redisClient *c) {
     genericZrangebyscoreCommand(c,1);
 }
 
+//zcount命令的实现
 void zcountCommand(redisClient *c) {
     robj *key = c->argv[1];
     robj *zobj;
@@ -2481,6 +2598,7 @@ void zcountCommand(redisClient *c) {
     int count = 0;
 
     /* Parse the range arguments */
+    //取到range
     if (zslParseRange(c->argv[2],c->argv[3],&range) != REDIS_OK) {
         addReplyError(c,"min or max is not a float");
         return;
@@ -2496,6 +2614,7 @@ void zcountCommand(redisClient *c) {
         double score;
 
         /* Use the first element in range as the starting point */
+        //以第一个在range中的元素作为起始点
         eptr = zzlFirstInRange(zl,&range);
 
         /* No "first" element */
@@ -2510,13 +2629,17 @@ void zcountCommand(redisClient *c) {
         redisAssertWithInfo(c,zobj,zslValueLteMax(score,&range));
 
         /* Iterate over elements in range */
+        //遍历在range中的元素
         while (eptr) {
             score = zzlGetScore(sptr);
 
             /* Abort when the node is no longer in range. */
+            //大于最大值，跳出
             if (!zslValueLteMax(score,&range)) {
+            	//
                 break;
             } else {
+            	//count加一
                 count++;
                 zzlNext(zl,&eptr,&sptr);
             }
@@ -2528,18 +2651,22 @@ void zcountCommand(redisClient *c) {
         unsigned long rank;
 
         /* Find first element in range */
+        //取第一个在range中的元素
         zn = zslFirstInRange(zsl, &range);
 
         /* Use rank of first element, if any, to determine preliminary count */
         if (zn != NULL) {
+        	//取到第一个元素在skiplist的位置
             rank = zslGetRank(zsl, zn->score, zn->obj);
             count = (zsl->length - (rank - 1));
 
             /* Find last element in range */
+            //取到最后一个在range中的元素
             zn = zslLastInRange(zsl, &range);
 
             /* Use rank of last element, if any, to determine the actual count */
             if (zn != NULL) {
+            	//取到最后一个元素在skiplist的位置
                 rank = zslGetRank(zsl, zn->score, zn->obj);
                 count -= (zsl->length - rank);
             }
@@ -2551,6 +2678,7 @@ void zcountCommand(redisClient *c) {
     addReplyLongLong(c, count);
 }
 
+//zlexcount命令的实现.逻辑与zcountCommand一样，但是调用的函数都是lex版的
 void zlexcountCommand(redisClient *c) {
     robj *key = c->argv[1];
     robj *zobj;
@@ -2558,6 +2686,7 @@ void zlexcountCommand(redisClient *c) {
     int count = 0;
 
     /* Parse the range arguments */
+    //取到lex range
     if (zslParseLexRange(c->argv[2],c->argv[3],&range) != REDIS_OK) {
         addReplyError(c,"min or max not valid string range item");
         return;
@@ -2631,6 +2760,8 @@ void zlexcountCommand(redisClient *c) {
 }
 
 /* This command implements ZRANGEBYLEX, ZREVRANGEBYLEX. */
+//通用函数，为zrangebylex,zrevrangebylex命令调用。
+//逻辑与genericZrangebyscoreCommand一样，调用lex版的函数进行比较等操作
 void genericZrangebylexCommand(redisClient *c, int reverse) {
     zlexrangespec range;
     robj *key = c->argv[1];
@@ -2649,6 +2780,7 @@ void genericZrangebylexCommand(redisClient *c, int reverse) {
         minidx = 2; maxidx = 3;
     }
 
+    //取到range
     if (zslParseLexRange(c->argv[minidx],c->argv[maxidx],&range) != REDIS_OK) {
         addReplyError(c,"min or max not valid string range item");
         return;
@@ -2661,6 +2793,7 @@ void genericZrangebylexCommand(redisClient *c, int reverse) {
         int pos = 4;
 
         while (remaining) {
+        	//取到limit和offset
             if (remaining >= 3 && !strcasecmp(c->argv[pos]->ptr,"limit")) {
                 if ((getLongFromObjectOrReply(c, c->argv[pos+1], &offset, NULL) != REDIS_OK) ||
                     (getLongFromObjectOrReply(c, c->argv[pos+2], &limit, NULL) != REDIS_OK)) return;
@@ -2689,6 +2822,7 @@ void genericZrangebylexCommand(redisClient *c, int reverse) {
         long long vlong;
 
         /* If reversed, get the last node in range as starting point. */
+        //取到第一个或者最后一个在range的元素作为起始点
         if (reverse) {
             eptr = zzlLastInLexRange(zl,&range);
         } else {
@@ -2713,6 +2847,7 @@ void genericZrangebylexCommand(redisClient *c, int reverse) {
 
         /* If there is an offset, just traverse the number of elements without
          * checking the score because that is done in the next loop. */
+        //跳过offset个元素
         while (eptr && offset--) {
             if (reverse) {
                 zzlPrev(zl,&eptr,&sptr);
@@ -2721,11 +2856,14 @@ void genericZrangebylexCommand(redisClient *c, int reverse) {
             }
         }
 
+        //取到limit个函数
         while (eptr && limit--) {
             /* Abort when the node is no longer in range. */
             if (reverse) {
+            	//往前移动，小于最小值跳出
                 if (!zzlLexValueGteMin(eptr,&range)) break;
             } else {
+            	//往后移动，大于最大值跳出
                 if (!zzlLexValueLteMax(eptr,&range)) break;
             }
 
@@ -2741,6 +2879,7 @@ void genericZrangebylexCommand(redisClient *c, int reverse) {
             }
 
             /* Move to next node */
+            //取到下一个元素
             if (reverse) {
                 zzlPrev(zl,&eptr,&sptr);
             } else {
@@ -2753,6 +2892,7 @@ void genericZrangebylexCommand(redisClient *c, int reverse) {
         zskiplistNode *ln;
 
         /* If reversed, get the last node in range as starting point. */
+        //取到第一个或者最后一个在range的元素作为起始点
         if (reverse) {
             ln = zslLastInLexRange(zsl,&range);
         } else {
@@ -2773,6 +2913,7 @@ void genericZrangebylexCommand(redisClient *c, int reverse) {
 
         /* If there is an offset, just traverse the number of elements without
          * checking the score because that is done in the next loop. */
+        //跳过offset个元素
         while (ln && offset--) {
             if (reverse) {
                 ln = ln->backward;
@@ -2781,6 +2922,7 @@ void genericZrangebylexCommand(redisClient *c, int reverse) {
             }
         }
 
+        //取到limit个元素
         while (ln && limit--) {
             /* Abort when the node is no longer in range. */
             if (reverse) {
@@ -2807,14 +2949,17 @@ void genericZrangebylexCommand(redisClient *c, int reverse) {
     setDeferredMultiBulkLength(c, replylen, rangelen);
 }
 
+//zrangebylex命令的实现
 void zrangebylexCommand(redisClient *c) {
     genericZrangebylexCommand(c,0);
 }
 
+//zrevrangebylex命令的实现
 void zrevrangebylexCommand(redisClient *c) {
     genericZrangebylexCommand(c,1);
 }
 
+//zcard命令的实现，取到zset中元素个数
 void zcardCommand(redisClient *c) {
     robj *key = c->argv[1];
     robj *zobj;
@@ -2825,6 +2970,7 @@ void zcardCommand(redisClient *c) {
     addReplyLongLong(c,zsetLength(zobj));
 }
 
+//zscore命令的实现，取到给定元素的score
 void zscoreCommand(redisClient *c) {
     robj *key = c->argv[1];
     robj *zobj;
@@ -2855,6 +3001,7 @@ void zscoreCommand(redisClient *c) {
     }
 }
 
+//通用函数，为zrank/zrevrank命令调用
 void zrankGenericCommand(redisClient *c, int reverse) {
     robj *key = c->argv[1];
     robj *ele = c->argv[2];
@@ -2877,7 +3024,9 @@ void zrankGenericCommand(redisClient *c, int reverse) {
         redisAssertWithInfo(c,zobj,sptr != NULL);
 
         rank = 1;
+        //遍历ziplist
         while(eptr != NULL) {
+        	//找到值一样的则跳出
             if (ziplistCompare(eptr,ele->ptr,sdslen(ele->ptr)))
                 break;
             rank++;
@@ -2916,14 +3065,17 @@ void zrankGenericCommand(redisClient *c, int reverse) {
     }
 }
 
+//zranke命令的实现
 void zrankCommand(redisClient *c) {
     zrankGenericCommand(c, 0);
 }
 
+//zrevrank命令的实现
 void zrevrankCommand(redisClient *c) {
     zrankGenericCommand(c, 1);
 }
 
+//zscan命令的实现
 void zscanCommand(redisClient *c) {
     robj *o;
     unsigned long cursor;
