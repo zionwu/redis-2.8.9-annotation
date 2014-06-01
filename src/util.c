@@ -41,6 +41,7 @@
 #include "util.h"
 
 /* Glob-style pattern matching. */
+//检测string是不是符合pattern的模式（glob-style）
 int stringmatchlen(const char *pattern, int patternLen,
         const char *string, int stringLen, int nocase)
 {
@@ -48,27 +49,36 @@ int stringmatchlen(const char *pattern, int patternLen,
         switch(pattern[0]) {
         case '*':
             while (pattern[1] == '*') {
-                pattern++;
+                //多个*等同与一个*
+            	pattern++;
                 patternLen--;
             }
             if (patternLen == 1)
                 return 1; /* match */
             while(stringLen) {
+            	//先忽略pattern的*,看string是否匹配后面的pattern,即pattern+1
                 if (stringmatchlen(pattern+1, patternLen-1,
                             string, stringLen, nocase))
                     return 1; /* match */
+
+                //*匹配string的一个字符
                 string++;
                 stringLen--;
             }
+
+            //到了这里说明没有匹配，否则应该在上面的递归调用返回
             return 0; /* no match */
             break;
         case '?':
             if (stringLen == 0)
                 return 0; /* no match */
+
+            //匹配任何字符，因此跳过当前字符
             string++;
             stringLen--;
             break;
         case '[':
+        //[xxx]这种情况
         {
             int not, match;
 
@@ -76,23 +86,28 @@ int stringmatchlen(const char *pattern, int patternLen,
             patternLen--;
             not = pattern[0] == '^';
             if (not) {
+            	//[^xxx]这种情况
                 pattern++;
                 patternLen--;
             }
             match = 0;
             while(1) {
                 if (pattern[0] == '\\') {
+                	//跳过当前"\"字符
                     pattern++;
                     patternLen--;
+                    //下一个字符匹配，则将match设为1。即模式中的'\x' 匹配string中的'x',x本身在模式中有特别含义故需转义
                     if (pattern[0] == string[0])
                         match = 1;
                 } else if (pattern[0] == ']') {
+                	//到了右括号，跳出while
                     break;
                 } else if (patternLen == 0) {
                     pattern--;
                     patternLen++;
                     break;
                 } else if (pattern[1] == '-' && patternLen >= 3) {
+                	//[a-z]这种情况
                     int start = pattern[0];
                     int end = pattern[2];
                     int c = string[0];
@@ -108,6 +123,7 @@ int stringmatchlen(const char *pattern, int patternLen,
                     }
                     pattern += 2;
                     patternLen -= 2;
+                    //c在范围内，将match设为1
                     if (c >= start && c <= end)
                         match = 1;
                 } else {
@@ -131,6 +147,7 @@ int stringmatchlen(const char *pattern, int patternLen,
             break;
         }
         case '\\':
+        	// "\"后面还有字符，那么跳过当前的字符
             if (patternLen >= 2) {
                 pattern++;
                 patternLen--;
@@ -138,9 +155,11 @@ int stringmatchlen(const char *pattern, int patternLen,
             /* fall through */
         default:
             if (!nocase) {
+            	//比较当前字符
                 if (pattern[0] != string[0])
                     return 0; /* no match */
             } else {
+            	//不考虑大小写，比较当前字符
                 if (tolower((int)pattern[0]) != tolower((int)string[0]))
                     return 0; /* no match */
             }
@@ -151,6 +170,7 @@ int stringmatchlen(const char *pattern, int patternLen,
         pattern++;
         patternLen--;
         if (stringLen == 0) {
+        	//当string长度为0了，但是pattern还有*,跳过所有的*
             while(*pattern == '*') {
                 pattern++;
                 patternLen--;
@@ -158,11 +178,13 @@ int stringmatchlen(const char *pattern, int patternLen,
             break;
         }
     }
+    //遍历结束后pattern和string长度都为0,说明匹配
     if (patternLen == 0 && stringLen == 0)
         return 1;
     return 0;
 }
 
+//检测string是不是符合pattern的模式（glob-style）
 int stringmatch(const char *pattern, const char *string, int nocase) {
     return stringmatchlen(pattern,strlen(pattern),string,strlen(string),nocase);
 }
@@ -173,6 +195,7 @@ int stringmatch(const char *pattern, const char *string, int nocase) {
  *
  * On parsing error, if *err is not NULL, it's set to 1, otherwise it's
  * set to 0 */
+//将内存的值转换为long long
 long long memtoll(const char *p, int *err) {
     const char *u;
     char buf[128];
@@ -182,8 +205,11 @@ long long memtoll(const char *p, int *err) {
 
     if (err) *err = 0;
     /* Search the first non digit character. */
+    //找到第一个非数字的字符, 设定mul的值
     u = p;
+    //跳过减号
     if (*u == '-') u++;
+    //跳过数字
     while(*u && isdigit(*u)) u++;
     if (*u == '\0' || !strcasecmp(u,"b")) {
         mul = 1;
@@ -204,19 +230,23 @@ long long memtoll(const char *p, int *err) {
         mul = 1;
     }
     digits = u-p;
+    //位数太长，直接返回longlong最大值
     if (digits >= sizeof(buf)) {
         if (err) *err = 1;
         return LLONG_MAX;
     }
     memcpy(buf,p,digits);
     buf[digits] = '\0';
+    //调用strtoll将数字字符转换为longlong
     val = strtoll(buf,NULL,10);
+    //将数字的值乘以单位
     return val*mul;
 }
 
 /* Convert a long long into a string. Returns the number of
  * characters needed to represent the number, that can be shorter if passed
  * buffer length is not enough to store the whole number. */
+//将longlong的值value转换为string
 int ll2string(char *s, size_t len, long long value) {
     char buf[32], *p;
     unsigned long long v;
@@ -226,11 +256,13 @@ int ll2string(char *s, size_t len, long long value) {
     v = (value < 0) ? -value : value;
     p = buf+31; /* point to the last character */
     do {
+    	//'0'+ (v%10)即最低位数字的ascii值
         *p-- = '0'+(v%10);
         v /= 10;
     } while(v);
     if (value < 0) *p-- = '-';
     p++;
+    //l为字符的数量
     l = 32-(p-buf);
     if (l+1 > len) l = len-1; /* Make sure it fits, including the nul term */
     memcpy(s,p,l);
@@ -241,6 +273,7 @@ int ll2string(char *s, size_t len, long long value) {
 /* Convert a string into a long long. Returns 1 if the string could be parsed
  * into a (non-overflowing) long long, 0 otherwise. The value will be set to
  * the parsed value when appropriate. */
+//将string形式的数字字符转换为longlong的整数
 int string2ll(const char *s, size_t slen, long long *value) {
     const char *p = s;
     size_t plen = 0;
@@ -251,6 +284,7 @@ int string2ll(const char *s, size_t slen, long long *value) {
         return 0;
 
     /* Special case: first and only digit is 0. */
+    //'0'的情况
     if (slen == 1 && p[0] == '0') {
         if (value != NULL) *value = 0;
         return 1;
@@ -270,9 +304,11 @@ int string2ll(const char *s, size_t slen, long long *value) {
         v = p[0]-'0';
         p++; plen++;
     } else if (p[0] == '0' && slen == 1) {
+    	//'0'的情况
         *value = 0;
         return 1;
     } else {
+    	//开头不是1到9开始，返回0
         return 0;
     }
 
@@ -307,6 +343,7 @@ int string2ll(const char *s, size_t slen, long long *value) {
 /* Convert a string into a long. Returns 1 if the string could be parsed into a
  * (non-overflowing) long, 0 otherwise. The value will be set to the parsed
  * value when appropriate. */
+//将string转化为long
 int string2l(const char *s, size_t slen, long *lval) {
     long long llval;
 
@@ -322,6 +359,7 @@ int string2l(const char *s, size_t slen, long *lval) {
 
 /* Convert a double to a string representation. Returns the number of bytes
  * required. The representation should always be parsable by stdtod(3). */
+//将double转换为string
 int d2string(char *buf, size_t len, double value) {
     if (isnan(value)) {
         len = snprintf(buf,len,"nan");
@@ -330,7 +368,9 @@ int d2string(char *buf, size_t len, double value) {
             len = snprintf(buf,len,"-inf");
         else
             len = snprintf(buf,len,"inf");
-    } else if (value == 0) {
+    }
+    //double类型可以直接和0比较么？应该用 |value| < precision来判断
+    else if (value == 0) {
         /* See: http://en.wikipedia.org/wiki/Signed_zero, "Comparisons". */
         if (1.0/value < 0)
             len = snprintf(buf,len,"-0");
@@ -363,6 +403,7 @@ int d2string(char *buf, size_t len, double value) {
  * given execution of Redis, so that if you are talking with an instance
  * having run_id == A, and you reconnect and it has run_id == B, you can be
  * sure that it is either a different instance or it was restarted. */
+//随机生产一串16进制的字符
 void getRandomHexChars(char *p, unsigned int len) {
     FILE *fp = fopen("/dev/urandom","r");
     char *charset = "0123456789abcdef";
@@ -372,6 +413,8 @@ void getRandomHexChars(char *p, unsigned int len) {
         /* If we can't read from /dev/urandom, do some reasonable effort
          * in order to create some entropy, since this function is used to
          * generate run_id and cluster instance IDs */
+
+    	//如果不能从/dev/urandom读到数据，那么自己生成字符
         char *x = p;
         unsigned int l = len;
         struct timeval tv;
@@ -412,6 +455,7 @@ void getRandomHexChars(char *p, unsigned int len) {
  * The function does not try to normalize everything, but only the obvious
  * case of one or more "../" appearning at the start of "filename"
  * relative path. */
+//得到给定文件的绝对路径
 sds getAbsolutePath(char *filename) {
     char cwd[1024];
     sds abspath;
@@ -421,6 +465,7 @@ sds getAbsolutePath(char *filename) {
     if (relpath[0] == '/') return relpath; /* Path is already absolute. */
 
     /* If path is relative, join cwd and relative path. */
+    //取到当前路径
     if (getcwd(cwd,sizeof(cwd)) == NULL) {
         sdsfree(relpath);
         return NULL;
@@ -461,6 +506,7 @@ sds getAbsolutePath(char *filename) {
  * relative or absolute path. This function just checks that no / or \
  * character exists inside the specified path, that's enough in the
  * environments where Redis runs. */
+//检查path中是否只含文件名
 int pathIsBaseName(char *path) {
     return strchr(path,'/') == NULL && strchr(path,'\\') == NULL;
 }

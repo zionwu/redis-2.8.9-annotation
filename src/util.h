@@ -32,14 +32,31 @@
 
 #include "sds.h"
 
+//检查string s是否匹配模式p
 int stringmatchlen(const char *p, int plen, const char *s, int slen, int nocase);
+
+//检查string s是否匹配模式p
 int stringmatch(const char *p, const char *s, int nocase);
+
+//将内存p的值转换为longlong返回
 long long memtoll(const char *p, int *err);
+
+//将longlong的值value转换为string
 int ll2string(char *s, size_t len, long long value);
+
+//将string的值转换为longlong
 int string2ll(const char *s, size_t slen, long long *value);
+
+//将string的值转换为long
 int string2l(const char *s, size_t slen, long *value);
+
+//将double的值转换为string
 int d2string(char *buf, size_t len, double value);
+
+//得到filename的绝对路径
 sds getAbsolutePath(char *filename);
+
+//判断路径中是否只含有文件名
 int pathIsBaseName(char *path);
 
 #endif
