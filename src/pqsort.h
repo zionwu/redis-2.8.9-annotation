@@ -33,6 +33,8 @@
 #ifndef __PQSORT_H
 #define __PQSORT_H
 
+//对数组a中的一部分范围排序，n是元素数量，es是单个元素大小
+//cmp是比较函数，lrange-rrange是需要排序的元素的范围
 void
 pqsort(void *a, size_t n, size_t es,
     int (*cmp) (const void *, const void *), size_t lrange, size_t rrange);

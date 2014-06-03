@@ -104,6 +104,7 @@ _pqsort(void *a, size_t n, size_t es,
 	int swaptype, cmp_result;
 
 loop:	SWAPINIT(a, es);
+    //当元素的数量少于7时，用插入法排序
 	if (n < 7) {
 		for (pm = (char *) a + es; pm < (char *) a + n * es; pm += es)
 			for (pl = pm; pl > (char *) a && cmp(pl - es, pl) > 0;
@@ -111,11 +112,16 @@ loop:	SWAPINIT(a, es);
 				swap(pl, pl - es);
 		return;
 	}
+
+	//选择pivot。选择中间元素
 	pm = (char *) a + (n / 2) * es;
 	if (n > 7) {
+		//大于7个元素，小于40个元素是从第一个元素，最后一个元素，中间元素中
+		//选择第二大的元素作为pivot
 		pl = (char *) a;
 		pn = (char *) a + (n - 1) * es;
 		if (n > 40) {
+			//超过40个元素，将区间分为8段，从9个元素中选择
 			d = (n / 8) * es;
 			pl = med3(pl, pl + d, pl + 2 * d, cmp);
 			pm = med3(pm - d, pm, pm + d, cmp);
@@ -123,20 +129,30 @@ loop:	SWAPINIT(a, es);
 		}
 		pm = med3(pl, pm, pn, cmp);
 	}
+
+	//将pivot与第一个元素交换
 	swap(a, pm);
+	//pa,pb指向第二个元素
 	pa = pb = (char *) a + es;
 
+	//pc,pd指向最后一个元素
 	pc = pd = (char *) a + (n - 1) * es;
 	for (;;) {
+		//从左边起找到比a大的值
 		while (pb <= pc && (cmp_result = cmp(pb, a)) <= 0) {
 			if (cmp_result == 0) {
+				//找到与pivot相等的值则移动到pa处，并将pa指向下一个元素。
+				//那么从a到pa-1的值与pivot一样
 				swap(pa, pb);
 				pa += es;
 			}
 			pb += es;
 		}
+		//从最右边找到比a小的值
 		while (pb <= pc && (cmp_result = cmp(pc, a)) >= 0) {
 			if (cmp_result == 0) {
+				//找到与pivot相等的值则移动到pd处，并将pd指向前一个元素。
+			    //那么从pd+1到最后一个元素的值与pivot一样
 				swap(pc, pd);
 				pd -= es;
 			}
@@ -144,6 +160,8 @@ loop:	SWAPINIT(a, es);
 		}
 		if (pb > pc)
 			break;
+
+		//交换pb,pc的值，这样pb左侧的值都不大于pivot,pc右侧的值都不小于pivot
 		swap(pb, pc);
 		pb += es;
 		pc -= es;
@@ -151,13 +169,20 @@ loop:	SWAPINIT(a, es);
 
 	pn = (char *) a + n * es;
 	r = min(pa - (char *) a, pb - pa);
+	//将[a, a+r]的元素与[pb-r, pb]的元素交换。
+	//当pa-a<pb-pa, a到pb-r 都是小于pivor的元素，pb-r到pa都是等于pivot的元素
+	//当pa-a>pb-pa, a到a+r的都是小于pivor的元素，a+r到pb的都是等于pivot的元素
 	vecswap(a, pb - r, r);
 	r = min((size_t)(pd - pc), pn - pd - es);
+	//将[pb, pb+r]的元素与[pn-r, pn]的元素交换
+	//当pd - pc > pn - pd - es, pb到pb+r都是等于pivot的元素，pb+r到pd都是大于pivot的元素
+	//当pd - pc < pn - pd - es, pb到pd-r都是等于pivot的元素，pd-r到pd都是大于pivot的元素
 	vecswap(pb, pn - r, r);
 	if ((r = pb - pa) > es) {
                 void *_l = a, *_r = ((unsigned char*)a)+r-1;
                 if (!((lrange < _l && rrange < _l) ||
                     (lrange > _r && rrange > _r)))
+            //当l,r在lrange, range范围内，则对其排序
 		    _pqsort(a, r / es, es, cmp, lrange, rrange);
         }
 	if ((r = pd - pc) > es) { 
@@ -171,6 +196,7 @@ loop:	SWAPINIT(a, es);
                 _r = ((unsigned char*)a)+r-1;
                 if (!((lrange < _l && rrange < _l) ||
                     (lrange > _r && rrange > _r)))
+                	//当l,r在lrange, range范围内，则对其排序
 		    goto loop;
 	}
 /*		qsort(pn - r, r / es, es, cmp);*/
