@@ -35,6 +35,7 @@
 
 zskiplistNode* zslGetElementByRank(zskiplist *zsl, unsigned long rank);
 
+//创建一个redisSortOperation的对象
 redisSortOperation *createSortOperation(int type, robj *pattern) {
     redisSortOperation *so = zmalloc(sizeof(*so));
     so->type = type;
@@ -58,6 +59,7 @@ redisSortOperation *createSortOperation(int type, robj *pattern) {
  *
  * The returned object will always have its refcount increased by 1
  * when it is non-NULL. */
+
 robj *lookupKeyByPattern(redisDb *db, robj *pattern, robj *subst) {
     char *p, *f, *k;
     sds spat, ssub;
@@ -67,6 +69,7 @@ robj *lookupKeyByPattern(redisDb *db, robj *pattern, robj *subst) {
     /* If the pattern is "#" return the substitution object itself in order
      * to implement the "SORT ... GET #" feature. */
     spat = pattern->ptr;
+    //如果pattern是'#'，返回subst
     if (spat[0] == '#' && spat[1] == '\0') {
         incrRefCount(subst);
         return subst;
@@ -80,6 +83,7 @@ robj *lookupKeyByPattern(redisDb *db, robj *pattern, robj *subst) {
 
     /* If we can't find '*' in the pattern we return NULL as to GET a
      * fixed key does not make sense. */
+    //如果pattern中不含有*,返回null
     p = strchr(spat,'*');
     if (!p) {
         decrRefCount(subst);
@@ -88,6 +92,7 @@ robj *lookupKeyByPattern(redisDb *db, robj *pattern, robj *subst) {
 
     /* Find out if we're dealing with a hash dereference. */
     if ((f = strstr(p+1, "->")) != NULL && *(f+2) != '\0') {
+    	//如果是xx*->xxx模式，取出field
         fieldlen = sdslen(spat)-(f-spat)-2;
         fieldobj = createStringObject(f+2,fieldlen);
     } else {
@@ -95,6 +100,7 @@ robj *lookupKeyByPattern(redisDb *db, robj *pattern, robj *subst) {
     }
 
     /* Perform the '*' substitution. */
+    //将pattern中的*替换成subst内的内容
     prefixlen = p-spat;
     sublen = sdslen(ssub);
     postfixlen = sdslen(spat)-(prefixlen+1)-(fieldlen ? fieldlen+2 : 0);
@@ -110,6 +116,7 @@ robj *lookupKeyByPattern(redisDb *db, robj *pattern, robj *subst) {
     if (o == NULL) goto noobj;
 
     if (fieldobj) {
+    	//如果field存在，但是key对应的不是hash，goto noobj
         if (o->type != REDIS_HASH) goto noobj;
 
         /* Retrieve value from hash by the field name. This operation
@@ -135,6 +142,7 @@ noobj:
 /* sortCompare() is used by qsort in sortCommand(). Given that qsort_r with
  * the additional parameter is not standard but a BSD-specific we have to
  * pass sorting parameters via the global 'server' structure */
+//传递给qsort的比较函数
 int sortCompare(const void *s1, const void *s2) {
     const redisSortObject *so1 = s1, *so2 = s2;
     int cmp;
@@ -149,11 +157,13 @@ int sortCompare(const void *s1, const void *s2) {
             /* Objects have the same score, but we don't want the comparison
              * to be undefined, so we compare objects lexicographically.
              * This way the result of SORT is deterministic. */
+        	//score一样的时候比较obj的字符序
             cmp = compareStringObjects(so1->obj,so2->obj);
         }
     } else {
         /* Alphanumeric sorting */
         if (server.sort_bypattern) {
+        	//至少有一个comobj为null时，都为null返回0，so1为null返回-1,否则返回1
             if (!so1->u.cmpobj || !so2->u.cmpobj) {
                 /* At least one compare object is NULL */
                 if (so1->u.cmpobj == so2->u.cmpobj)
@@ -186,6 +196,7 @@ int sortCompare(const void *s1, const void *s2) {
 
 /* The SORT command is the most complex command in Redis. Warning: this code
  * is optimized for speed and a bit less for readability */
+//sort命令的实现
 void sortCommand(redisClient *c) {
     list *operations;
     unsigned int outputlen = 0;
