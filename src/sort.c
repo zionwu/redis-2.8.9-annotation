@@ -59,7 +59,7 @@ redisSortOperation *createSortOperation(int type, robj *pattern) {
  *
  * The returned object will always have its refcount increased by 1
  * when it is non-NULL. */
-
+//处理sort key by pattern的情况
 robj *lookupKeyByPattern(redisDb *db, robj *pattern, robj *subst) {
     char *p, *f, *k;
     sds spat, ssub;
@@ -123,6 +123,7 @@ robj *lookupKeyByPattern(redisDb *db, robj *pattern, robj *subst) {
          * already increases the refcount of the returned object. */
         o = hashTypeGetObject(o, fieldobj);
     } else {
+    	//如果key对应的不是string类型，goto noobj
         if (o->type != REDIS_STRING) goto noobj;
 
         /* Every object that this function returns needs to have its refcount
@@ -233,6 +234,7 @@ void sortCommand(redisClient *c) {
         sortval = createListObject();
 
     /* The SORT command has an SQL-alike syntax, parse it */
+    //解析命令的参数：SORT key [BY pattern] [LIMIT offset count] [GET pattern [GET pattern ...]] [ASC|DESC] [ALPHA] [STORE destination]
     while(j < c->argc) {
         int leftargs = c->argc-j-1;
         if (!strcasecmp(c->argv[j]->ptr,"asc")) {
@@ -283,6 +285,7 @@ void sortCommand(redisClient *c) {
      * However in the case 'dontsort' is true, but the type to sort is a
      * sorted set, we don't need to do anything as ordering is guaranteed
      * in this special case. */
+    //如果是store或者是被lua调用，而nosort使用的时候，改变dontsort的值，强制使用alpha排序
     if ((storekey || c->flags & REDIS_LUA_CLIENT) &&
         (dontsort && sortval->type != REDIS_ZSET))
     {
@@ -293,10 +296,12 @@ void sortCommand(redisClient *c) {
     }
 
     /* Destructively convert encoded sorted sets for SORT. */
+    //如果是zset，将其用skiplist表示
     if (sortval->type == REDIS_ZSET)
         zsetConvert(sortval, REDIS_ENCODING_SKIPLIST);
 
     /* Objtain the length of the object to sort. */
+    //取到key对应集合的长度
     switch(sortval->type) {
     case REDIS_LIST: vectorlen = listTypeLength(sortval); break;
     case REDIS_SET: vectorlen =  setTypeSize(sortval); break;
@@ -305,6 +310,7 @@ void sortCommand(redisClient *c) {
     }
 
     /* Perform LIMIT start,count sanity checking. */
+    //处理offset, limit得到start, end
     start = (limit_start < 0) ? 0 : limit_start;
     end = (limit_count < 0) ? vectorlen-1 : start+limit_count-1;
     if (start >= vectorlen) {
@@ -327,6 +333,7 @@ void sortCommand(redisClient *c) {
         dontsort &&
         (start != 0 || end != vectorlen-1))
     {
+    	//对于zset和dontsort这种情况，不需要从集合载入所有元素。只需要载入limit个元素
         vectorlen = end-start+1;
     }
 
@@ -334,6 +341,7 @@ void sortCommand(redisClient *c) {
     vector = zmalloc(sizeof(redisSortObject)*vectorlen);
     j = 0;
 
+    //根据集合的不同类型和情况，将集合中的元素添加到vector中
     if (sortval->type == REDIS_LIST) {
         listTypeIterator *li = listTypeInitIterator(sortval,0,REDIS_TAIL);
         listTypeEntry entry;
@@ -371,11 +379,12 @@ void sortCommand(redisClient *c) {
         /* Check if starting point is trivial, before doing log(N) lookup. */
         if (desc) {
             long zsetlen = dictSize(((zset*)sortval->ptr)->dict);
-
+            //降序的话第一个元素是zsetlen-start
             ln = zsl->tail;
             if (start > 0)
                 ln = zslGetElementByRank(zsl,zsetlen-start);
         } else {
+        	//升序的话第一个元素是start+1
             ln = zsl->header->level[0].forward;
             if (start > 0)
                 ln = zslGetElementByRank(zsl,start+1);
@@ -388,6 +397,7 @@ void sortCommand(redisClient *c) {
             vector[j].u.score = 0;
             vector[j].u.cmpobj = NULL;
             j++;
+            //降序时从后往前遍历，升序是从前往后遍历
             ln = desc ? ln->backward : ln->level[0].forward;
         }
         /* The code producing the output does not know that in the case of
@@ -414,11 +424,13 @@ void sortCommand(redisClient *c) {
     redisAssertWithInfo(c,sortval,j == vectorlen);
 
     /* Now it's time to load the right scores in the sorting vector */
+    //设置vector里面u的值
     if (dontsort == 0) {
         for (j = 0; j < vectorlen; j++) {
             robj *byval;
             if (sortby) {
                 /* lookup value to sort by */
+            	//sort key by patter时，用obj替换pattern得到用来比较的值
                 byval = lookupKeyByPattern(c->db,sortby,vector[j].obj);
                 if (!byval) continue;
             } else {
@@ -427,9 +439,11 @@ void sortCommand(redisClient *c) {
             }
 
             if (alpha) {
+            	//存在alpha参数则使用lex序，设置cmpobj
                 if (sortby) vector[j].u.cmpobj = getDecodedObject(byval);
             } else {
                 if (byval->encoding == REDIS_ENCODING_RAW) {
+                	//encoding为raw时将值转化为double
                     char *eptr;
 
                     vector[j].u.score = strtod(byval->ptr,&eptr);
@@ -442,6 +456,7 @@ void sortCommand(redisClient *c) {
                     /* Don't need to decode the object if it's
                      * integer-encoded (the only encoding supported) so
                      * far. We can just cast it */
+                	//encoding为int时转化为long
                     vector[j].u.score = (long)byval->ptr;
                 } else {
                     redisAssertWithInfo(c,sortval,1 != 1);
@@ -457,13 +472,16 @@ void sortCommand(redisClient *c) {
     }
 
     if (dontsort == 0) {
+    	//设置server的参数，将在sortCompare函数中用到
         server.sort_desc = desc;
         server.sort_alpha = alpha;
         server.sort_bypattern = sortby ? 1 : 0;
         server.sort_store = storekey ? 1 : 0;
         if (sortby && (start != 0 || end != vectorlen-1))
+        	//使用partial pqsort来排序
             pqsort(vector,vectorlen,sizeof(redisSortObject),sortCompare, start,end);
         else
+        	//全排序
             qsort(vector,vectorlen,sizeof(redisSortObject),sortCompare);
     }
 
@@ -474,14 +492,17 @@ void sortCommand(redisClient *c) {
         addReplyError(c,"One or more scores can't be converted into double");
     } else if (storekey == NULL) {
         /* STORE option not specified, sent the sorting result to client */
+    	//store参数没有指定，直接返回结果
         addReplyMultiBulkLen(c,outputlen);
         for (j = start; j <= end; j++) {
             listNode *ln;
             listIter li;
-
+            //没有get参数，直接返回排序结果
             if (!getop) addReplyBulk(c,vector[j].obj);
             listRewind(operations,&li);
             while((ln = listNext(&li))) {
+            	//取到存在operations这个list中的get的pattern，
+            	//并替换pattern得到key，根据key从db中取到值
                 redisSortOperation *sop = ln->value;
                 robj *val = lookupKeyByPattern(c->db,sop->pattern,
                     vector[j].obj);
@@ -500,6 +521,7 @@ void sortCommand(redisClient *c) {
             }
         }
     } else {
+    	//指定了store参数，创建一个ziplist保存结果
         robj *sobj = createZiplistObject();
 
         /* STORE option specified, set the sorting result as a List object */
@@ -508,10 +530,13 @@ void sortCommand(redisClient *c) {
             listIter li;
 
             if (!getop) {
+            	//没有get参数，直接将排序结果添加到list中
                 listTypePush(sobj,vector[j].obj,REDIS_TAIL);
             } else {
                 listRewind(operations,&li);
                 while((ln = listNext(&li))) {
+                	//取到存在operations这个list中的get的pattern，
+                	//并替换pattern得到key，根据key从db中取到值
                     redisSortOperation *sop = ln->value;
                     robj *val = lookupKeyByPattern(c->db,sop->pattern,
                         vector[j].obj);
