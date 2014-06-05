@@ -39,7 +39,8 @@
 typedef char *sds;
 
 
-//sds的结构体
+//sds的结构体。一个sds是一个char*,直接指向字符串。
+//在sds指针前的内存是sdshdr结构体，保存len,free等信息
 struct sdshdr {
     int len;    //sds的长度
     int free;   //空闲的长度
@@ -62,19 +63,19 @@ static inline size_t sdsavail(const sds s) {
     return sh->free;
 }
 
-//创建一个长度为initlen，string为init的的sds
+//创建一个长度为initlen，string内容与init指向字符串一样的的sds
 sds sdsnewlen(const void *init, size_t initlen);
 
-//创建一个指向init的sds
+//创建一个string内容与init指向字符串一样的的sds
 sds sdsnew(const char *init);
 
-//创建一个空的sds
+//创建一个空字符串的sds
 sds sdsempty(void);
 
 //取到sds中string的长度
 size_t sdslen(const sds s);
 
-//复制一个s
+//复制一个sds s
 sds sdsdup(const sds s);
 
 //释放sds s的内存
@@ -92,13 +93,13 @@ sds sdscatlen(sds s, const void *t, size_t len);
 //将string t加到sds s的后面
 sds sdscat(sds s, const char *t);
 
-//将sds t添加到sds s后面
+//将sds t的string添加到sds s的string后面
 sds sdscatsds(sds s, const sds t);
 
-//将sds s的string内容变成t所指stirng
+//将sds t的string内容复制到s所指stirng
 sds sdscpylen(sds s, const char *t, size_t len);
 
-//将sds s的string内容变成t所指stirng
+//将sds t的string内容复制到s所指stirng
 sds sdscpy(sds s, const char *t);
 
 //将ap内参数填入fmt模式后添加到sds s后面
@@ -110,22 +111,22 @@ sds sdscatprintf(sds s, const char *fmt, ...)
 sds sdscatprintf(sds s, const char *fmt, ...);
 #endif
 
-//从sds s的左右两边移除cset中字符
+//从sds s的string左右两边移除cset中字符
 sds sdstrim(sds s, const char *cset);
 
-//将sds s剪切成从start 到end的string
+//取原sds的start到end构成新的string
 void sdsrange(sds s, int start, int end);
 
 //更新sds的长度
 void sdsupdatelen(sds s);
 
-//将sds s的string清除
+//将sds s的string内容清空
 void sdsclear(sds s);
 
-//比较sds s1与s2
+//比较sds s1与s2的string大小
 int sdscmp(const sds s1, const sds s2);
 
-//根据sep将s分隔，返回分隔后每一子串对应的sds
+//根据sep根据s分隔，返回分隔后每一子串对应的sds
 sds *sdssplitlen(const char *s, int len, const char *sep, int seplen, int *count);
 
 //对tokens内的sds调用sdsfree释放内存
@@ -140,20 +141,20 @@ void sdstoupper(sds s);
 //从longlong型的value构造sds
 sds sdsfromlonglong(long long value);
 
-//
+//将p添加到sds s的string后面，将p中的不可打印的字符转义
 sds sdscatrepr(sds s, const char *p, size_t len);
 
-//
+//将line中内容分隔成参数以sds返回
 sds *sdssplitargs(const char *line, int *argc);
 
-//
+//将sds中的string内容以to替换from
 sds sdsmapchars(sds s, const char *from, const char *to, size_t setlen);
 
 //将argv的字符串以sep连接起来，返回对应的sds
 sds sdsjoin(char **argv, int argc, char *sep);
 
 /* Low level functions exposed to the user API */
-//为sds s的内存增加addlen字节
+//为sds s的string内存增加addlen字节
 sds sdsMakeRoomFor(sds s, size_t addlen);
 
 //将sds的长度增长incr
