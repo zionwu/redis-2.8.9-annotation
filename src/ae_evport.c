@@ -65,6 +65,7 @@ static int evport_debug = 0;
  */
 #define MAX_EVENT_BATCHSZ 512
 
+//基于evport的结构体，用于aeEventLoop的apidata
 typedef struct aeApiState {
     int     portfd;                             /* event port */
     int     npending;                           /* # of pending fds */
@@ -72,6 +73,7 @@ typedef struct aeApiState {
     int     pending_masks[MAX_EVENT_BATCHSZ];   /* pending fds' masks */
 } aeApiState;
 
+//被ae.c中aeCreateEventLoop调用，初始化aeApiState并设为apidata
 static int aeApiCreate(aeEventLoop *eventLoop) {
     int i;
     aeApiState *state = zmalloc(sizeof(aeApiState));
@@ -85,6 +87,7 @@ static int aeApiCreate(aeEventLoop *eventLoop) {
 
     state->npending = 0;
 
+    //初始化数组
     for (i = 0; i < MAX_EVENT_BATCHSZ; i++) {
         state->pending_fds[i] = -1;
         state->pending_masks[i] = AE_NONE;
@@ -94,11 +97,13 @@ static int aeApiCreate(aeEventLoop *eventLoop) {
     return 0;
 }
 
+//被ae.c中aeResizeSetSize调用的函数，对于evport不做任何操作
 static int aeApiResize(aeEventLoop *eventLoop, int setsize) {
     /* Nothing to resize here. */
     return 0;
 }
 
+//被aeDeleteEventLoop调用的函数，释放aeApiState的内存
 static void aeApiFree(aeEventLoop *eventLoop) {
     aeApiState *state = eventLoop->apidata;
 
@@ -106,6 +111,7 @@ static void aeApiFree(aeEventLoop *eventLoop) {
     zfree(state);
 }
 
+//返回给定文件描述符在pending_ids数组中的index
 static int aeApiLookupPending(aeApiState *state, int fd) {
     int i;
 
@@ -120,6 +126,7 @@ static int aeApiLookupPending(aeApiState *state, int fd) {
 /*
  * Helper function to invoke port_associate for the given fd and mask.
  */
+//辅助函数，调用port_associate
 static int aeApiAssociate(const char *where, int portfd, int fd, int mask) {
     int events = 0;
     int rv, err;
@@ -149,6 +156,7 @@ static int aeApiAssociate(const char *where, int portfd, int fd, int mask) {
     return rv;
 }
 
+//被aeCreateFileEvent调用
 static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
     aeApiState *state = eventLoop->apidata;
     int fullmask, pfd;
@@ -162,9 +170,12 @@ static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
      * we call port_associate() again.
      */
     fullmask = mask | eventLoop->events[fd].mask;
+
+    //从aeApiState的pending_fds寻找fd对应的index
     pfd = aeApiLookupPending(state, fd);
 
     if (pfd != -1) {
+    	//index存在，则fd存在于pending_fds中
         /*
          * This fd was recently returned from aeApiPoll.  It should be safe to
          * assume that the consumer has processed that poll event, but we play
@@ -173,13 +184,17 @@ static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
          */
         if (evport_debug)
             fprintf(stderr, "aeApiAddEvent: adding to pending fd %d\n", fd);
+
+        //更新pending_masks的mask值
         state->pending_masks[pfd] |= fullmask;
         return 0;
     }
 
+    //fd不存在于pending_fds中，调用aeApiAssociate将其与portfd关联
     return (aeApiAssociate("aeApiAddEvent", state->portfd, fd, fullmask));
 }
 
+//被aeDeleteFileEvent调用
 static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int mask) {
     aeApiState *state = eventLoop->apidata;
     int fullmask, pfd;
@@ -187,9 +202,11 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int mask) {
     if (evport_debug)
         fprintf(stderr, "del fd %d mask 0x%x\n", fd, mask);
 
+    //从aeApiState的pending_fds寻找fd对应的index
     pfd = aeApiLookupPending(state, fd);
 
     if (pfd != -1) {
+    	//index存在，则fd存在于pending_fds中
         if (evport_debug)
             fprintf(stderr, "deleting event from pending fd %d\n", fd);
 
@@ -198,8 +215,10 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int mask) {
          * associated with the port.  All we need to do is update
          * pending_mask appropriately.
          */
+        //将pending_masks[pfd]清除mask
         state->pending_masks[pfd] &= ~mask;
 
+        //如果mask值是AE_NONE，则该fd已经无用了，将pending_fds[pfd]设为-1
         if (state->pending_masks[pfd] == AE_NONE)
             state->pending_fds[pfd] = -1;
 
@@ -216,6 +235,7 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int mask) {
 
     fullmask = eventLoop->events[fd].mask;
     if (fullmask == AE_NONE) {
+    	//fullmask为AE_NONE，该fd已经无用，调用port_dissociate
         /*
          * We're removing *all* events, so use port_dissociate to remove the
          * association completely.  Failure here indicates a bug.
@@ -240,6 +260,7 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int mask) {
     }
 }
 
+//被aeProcessEvents调用
 static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     aeApiState *state = eventLoop->apidata;
     struct timespec timeout, *tsp;
@@ -252,6 +273,7 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
      * port now, before calling port_get().  See the block comment at the top of
      * this file for an explanation of why.
      */
+    //将pending_fds的fd重新与portfd关联
     for (i = 0; i < state->npending; i++) {
         if (state->pending_fds[i] == -1)
             /* This fd has since been deleted. */
@@ -262,7 +284,7 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
             /* See aeApiDelEvent for why this case is fatal. */
             abort();
         }
-
+        //关联后清除pending_masks和pending_fds的值
         state->pending_masks[i] = AE_NONE;
         state->pending_fds[i] = -1;
     }
@@ -294,6 +316,7 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
 
     state->npending = nevents;
 
+    //根据port_getn的调用结果设置就绪事件
     for (i = 0; i < nevents; i++) {
             mask = 0;
             if (event[i].portev_events & POLLIN)
@@ -315,6 +338,7 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     return nevents;
 }
 
+////实现多路复用层用的是evport
 static char *aeApiName(void) {
     return "evport";
 }
