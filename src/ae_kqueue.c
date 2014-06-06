@@ -33,15 +33,19 @@
 #include <sys/event.h>
 #include <sys/time.h>
 
+//基于kqueue的结构体,用于eventLoop的apidata
 typedef struct aeApiState {
     int kqfd;
     struct kevent *events;
 } aeApiState;
 
+
+//被ae.c中aeCreateEventLoop调用，初始化aeApiState并设为apidata
 static int aeApiCreate(aeEventLoop *eventLoop) {
     aeApiState *state = zmalloc(sizeof(aeApiState));
 
     if (!state) return -1;
+    //为数组分配内存
     state->events = zmalloc(sizeof(struct kevent)*eventLoop->setsize);
     if (!state->events) {
         zfree(state);
@@ -57,6 +61,7 @@ static int aeApiCreate(aeEventLoop *eventLoop) {
     return 0;    
 }
 
+//被ae.c中aeResizeSetSize调用的函数，根据新的setsize调整aeApiState内数组events大小
 static int aeApiResize(aeEventLoop *eventLoop, int setsize) {
     aeApiState *state = eventLoop->apidata;
 
@@ -64,6 +69,7 @@ static int aeApiResize(aeEventLoop *eventLoop, int setsize) {
     return 0;
 }
 
+//被aeDeleteEventLoop调用的函数，释放aeApiState占用的内存
 static void aeApiFree(aeEventLoop *eventLoop) {
     aeApiState *state = eventLoop->apidata;
 
@@ -72,12 +78,15 @@ static void aeApiFree(aeEventLoop *eventLoop) {
     zfree(state);
 }
 
+//被aeCreateFileEvent调用
 static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
     aeApiState *state = eventLoop->apidata;
     struct kevent ke;
     
     if (mask & AE_READABLE) {
+    	//设置kevent的值
         EV_SET(&ke, fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+        //将kevent设置到kqfd
         if (kevent(state->kqfd, &ke, 1, NULL, 0, NULL) == -1) return -1;
     }
     if (mask & AE_WRITABLE) {
@@ -87,12 +96,15 @@ static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
     return 0;
 }
 
+//被aeDeleteFileEvent调用
 static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int mask) {
     aeApiState *state = eventLoop->apidata;
     struct kevent ke;
 
     if (mask & AE_READABLE) {
+    	//设置kevent的值
         EV_SET(&ke, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+        //将kevent设置到kqfd中
         kevent(state->kqfd, &ke, 1, NULL, 0, NULL);
     }
     if (mask & AE_WRITABLE) {
@@ -101,10 +113,12 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int mask) {
     }
 }
 
+//被aeProcessEvents调用，查询就绪的文件描述符
 static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     aeApiState *state = eventLoop->apidata;
     int retval, numevents = 0;
 
+    //调用kevent查询就绪的文件描述符
     if (tvp != NULL) {
         struct timespec timeout;
         timeout.tv_sec = tvp->tv_sec;
@@ -120,6 +134,7 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
         int j;
         
         numevents = retval;
+        //根据结果设置就绪事件
         for(j = 0; j < numevents; j++) {
             int mask = 0;
             struct kevent *e = state->events+j;
@@ -133,6 +148,7 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     return numevents;
 }
 
+//实现多路复用层用的是kqueue
 static char *aeApiName(void) {
     return "kqueue";
 }
