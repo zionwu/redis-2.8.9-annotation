@@ -43,25 +43,64 @@
 #define AF_LOCAL AF_UNIX
 #endif
 
+//创建一个新的TCP连接并连接到给定地址端口
 int anetTcpConnect(char *err, char *addr, int port);
+
+//创建一个新的非阻塞的TCP连接并连接到给定地址端口
 int anetTcpNonBlockConnect(char *err, char *addr, int port);
+
+//创建一个unix socket连接并连接到给定路径
 int anetUnixConnect(char *err, char *path);
+
+//创建一个非阻塞的unix socket连接并连接到给定路径
 int anetUnixNonBlockConnect(char *err, char *path);
+
+//从socket读到count个字节后返回
 int anetRead(int fd, char *buf, int count);
+
+//解析host并返回IP地址
 int anetResolve(char *err, char *host, char *ipbuf, size_t ipbuf_len);
+
+//验证host是否是IP地址的格式
 int anetResolveIP(char *err, char *host, char *ipbuf, size_t ipbuf_len);
+
+//创建一个基于IPv4的TCP服务器socket
 int anetTcpServer(char *err, int port, char *bindaddr, int backlog);
+
+//创建一个基于IPv6的TCP服务器socket
 int anetTcp6Server(char *err, int port, char *bindaddr, int backlog);
+
+//创建一个unix服务器socket
 int anetUnixServer(char *err, char *path, mode_t perm, int backlog);
+
+//接受新的TPC连接
 int anetTcpAccept(char *err, int serversock, char *ip, size_t ip_len, int *port);
+
+////接受新的unix连接
 int anetUnixAccept(char *err, int serversock);
+
+//往socket中写进count个字节后返回
 int anetWrite(int fd, char *buf, int count);
+
+//将socket的O_NONBLOCK设置
 int anetNonBlock(char *err, int fd);
+
+//使TCP_NODELAY选项生效
 int anetEnableTcpNoDelay(char *err, int fd);
+
+//使TCP_NODELAY选项失效
 int anetDisableTcpNoDelay(char *err, int fd);
+
+//使SO_KEEPALIVE选项生效
 int anetTcpKeepAlive(char *err, int fd);
+
+//取到连接另一方的ip地址和端口
 int anetPeerToString(int fd, char *ip, size_t ip_len, int *port);
+
+//将socket描述符fd的keep alive选项设上
 int anetKeepAlive(char *err, int fd, int interval);
+
+//取到连接的本地ip地址和端口
 int anetSockName(int fd, char *ip, size_t ip_len, int *port);
 
 #endif
