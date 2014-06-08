@@ -37,6 +37,7 @@
 /* This helper function used by GETBIT / SETBIT parses the bit offset argument
  * making sure an error is returned if it is negative or if it overflows
  * Redis 512 MB limit for the string value. */
+//辅助函数，将robj中的值转换为longlong型并赋offset
 static int getBitOffsetFromArgument(redisClient *c, robj *o, size_t *offset) {
     long long loffset;
     char *err = "bit offset is not an integer or out of range";
@@ -45,6 +46,7 @@ static int getBitOffsetFromArgument(redisClient *c, robj *o, size_t *offset) {
         return REDIS_ERR;
 
     /* Limit offset to 512MB in bytes */
+    //loffset不是正数或者大于512MB时报错
     if ((loffset < 0) || ((unsigned long long)loffset >> 3) >= (512*1024*1024))
     {
         addReplyError(c,err);
@@ -58,6 +60,7 @@ static int getBitOffsetFromArgument(redisClient *c, robj *o, size_t *offset) {
 /* Count number of bits set in the binary array pointed by 's' and long
  * 'count' bytes. The implementation of this function is required to
  * work with a input string length up to 512 MB. */
+//计算在s中有多少位被置1
 size_t redisPopcount(void *s, long count) {
     size_t bits = 0;
     unsigned char *p = s;
@@ -107,6 +110,9 @@ size_t redisPopcount(void *s, long count) {
  * no zero bit is found, it returns count*8 assuming the string is zero
  * padded on the right. However if 'bit' is 1 it is possible that there is
  * not a single set bit in the bitmap. In this special case -1 is returned. */
+//返回s中第一个1或0的位置。
+//如果bit是0,而s中都是1,那么就返回count*8,因为假设s末尾后一位是0
+//如果bit是1,而s中都是0，那么返回-1
 long redisBitpos(void *s, long count, int bit) {
     unsigned long *l;
     unsigned char *c;
@@ -124,6 +130,7 @@ long redisBitpos(void *s, long count, int bit) {
      * aligned. */
 
     /* Skip initial bits not aligned to sizeof(unsigned long) byte by byte. */
+    //如果bit是1,跳出连续是1的字节。如果bit是0，跳过连续是1的字节
     skipval = bit ? 0 : UCHAR_MAX;
     c = (unsigned char*) s;
     while((unsigned long)c & (sizeof(*l)-1) && count) {
@@ -134,6 +141,7 @@ long redisBitpos(void *s, long count, int bit) {
     }
 
     /* Skip bits with full word step. */
+    //如果bit是1,跳出连续是1的字长(word)。如果bit是0，跳过连续是1的字长(word)
     skipval = bit ? 0 : ULONG_MAX;
     l = (unsigned long*) c;
     while (count >= sizeof(*l)) {
@@ -150,6 +158,7 @@ long redisBitpos(void *s, long count, int bit) {
      *
      * Note that the loading is designed to work even when the bytes left
      * (count) are less than a full word. We pad it with zero on the right. */
+    //将字节载入到word中，低位的载到work的高位中，即在s中是big endian编码
     c = (unsigned char*)l;
     for (j = 0; j < sizeof(*l); j++) {
         word <<= 8;
@@ -165,6 +174,7 @@ long redisBitpos(void *s, long count, int bit) {
      * return -1 to signal that there is not a single "1" in the whole
      * string. This can't happen when we are looking for "0" as we assume
      * that the right of the string is zero padded. */
+    //如果是找1,但是s全是0，返回-1
     if (bit == 1 && word == 0) return -1;
 
     /* Last word left, scan bit by bit. The first thing we need is to
@@ -173,8 +183,10 @@ long redisBitpos(void *s, long count, int bit) {
      * simple trick. */
     one = ULONG_MAX; /* All bits set to 1.*/
     one >>= 1;       /* All bits set to 1 but the MSB. */
+    //只有最高位是1
     one = ~one;      /* All bits set to 0 but the MSB. */
 
+    //从word的高位到低位寻找1或者0
     while(one) {
         if (((one & word) != 0) == bit) return pos;
         pos++;
@@ -197,6 +209,7 @@ long redisBitpos(void *s, long count, int bit) {
 #define BITOP_NOT   3
 
 /* SETBIT key offset bitvalue */
+//setbit命令的实现
 void setbitCommand(redisClient *c) {
     robj *o;
     char *err = "bit is not an integer or out of range";
@@ -205,13 +218,16 @@ void setbitCommand(redisClient *c) {
     int byteval, bitval;
     long on;
 
+    //取到offset
     if (getBitOffsetFromArgument(c,c->argv[2],&bitoffset) != REDIS_OK)
         return;
 
+    //取到bitvalue
     if (getLongFromObjectOrReply(c,c->argv[3],&on,err) != REDIS_OK)
         return;
 
     /* Bits can only be set or cleared... */
+    //bitvalue不是0或1,报错
     if (on & ~1) {
         addReplyError(c,err);
         return;
@@ -219,6 +235,7 @@ void setbitCommand(redisClient *c) {
 
     o = lookupKeyWrite(c->db,c->argv[1]);
     if (o == NULL) {
+    	//key对应的obj不存在，创建一个新的添加到db中
         o = createObject(REDIS_STRING,sdsempty());
         dbAdd(c->db,c->argv[1],o);
     } else {
@@ -227,17 +244,24 @@ void setbitCommand(redisClient *c) {
     }
 
     /* Grow sds value to the right length if necessary */
+    //如果obj的sds不够长，将长度增至byte
     byte = bitoffset >> 3;
     o->ptr = sdsgrowzero(o->ptr,byte+1);
 
     /* Get current values */
+    //取到offset所在的字节
     byteval = ((uint8_t*)o->ptr)[byte];
+    //取到在该字节上的位置
     bit = 7 - (bitoffset & 0x7);
+    //offset位置上的值
     bitval = byteval & (1 << bit);
 
     /* Update byte with new bit value and return original value */
+    //byteval为将offset位置0后的值
     byteval &= ~(1 << bit);
+    //将offset位置设成给定值后，求出该字节的值
     byteval |= ((on & 0x1) << bit);
+    //重设字节的值
     ((uint8_t*)o->ptr)[byte] = byteval;
     signalModifiedKey(c->db,c->argv[1]);
     notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"setbit",c->argv[1],c->db->id);
@@ -246,6 +270,7 @@ void setbitCommand(redisClient *c) {
 }
 
 /* GETBIT key offset */
+//getbit命令的实现
 void getbitCommand(redisClient *c) {
     robj *o;
     char llbuf[32];
@@ -259,8 +284,12 @@ void getbitCommand(redisClient *c) {
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
         checkType(c,o,REDIS_STRING)) return;
 
+    //取到offset在哪个字节上
     byte = bitoffset >> 3;
+    //取到在该字节什么位置上
     bit = 7 - (bitoffset & 0x7);
+
+    //取到该位置上的值
     if (o->encoding != REDIS_ENCODING_RAW) {
         if (byte < (size_t)ll2string(llbuf,sizeof(llbuf),(long)o->ptr))
             bitval = llbuf[byte] & (1 << bit);
@@ -273,6 +302,7 @@ void getbitCommand(redisClient *c) {
 }
 
 /* BITOP op_name target_key src_key1 src_key2 src_key3 ... src_keyN */
+//bitop命令的实现
 void bitopCommand(redisClient *c) {
     char *opname = c->argv[1]->ptr;
     robj *o, *targetkey = c->argv[2];
@@ -284,6 +314,7 @@ void bitopCommand(redisClient *c) {
     unsigned char *res = NULL; /* Resulting string. */
 
     /* Parse the operation name. */
+    //解析操作的类型
     if ((opname[0] == 'a' || opname[0] == 'A') && !strcasecmp(opname,"and"))
         op = BITOP_AND;
     else if((opname[0] == 'o' || opname[0] == 'O') && !strcasecmp(opname,"or"))
@@ -298,12 +329,14 @@ void bitopCommand(redisClient *c) {
     }
 
     /* Sanity check: NOT accepts only a single key argument. */
+    //not操作时只有一个source key，否则报错
     if (op == BITOP_NOT && c->argc != 4) {
         addReplyError(c,"BITOP NOT must be called with a single source key.");
         return;
     }
 
     /* Lookup keys, and store pointers to the string objects into an array. */
+    //为数组分配空间，保存source key的值和长度
     numkeys = c->argc - 3;
     src = zmalloc(sizeof(unsigned char*) * numkeys);
     len = zmalloc(sizeof(long) * numkeys);
@@ -311,6 +344,7 @@ void bitopCommand(redisClient *c) {
     for (j = 0; j < numkeys; j++) {
         o = lookupKeyRead(c->db,c->argv[j+3]);
         /* Handle non-existing keys as empty strings. */
+        //key不存在
         if (o == NULL) {
             objects[j] = NULL;
             src[j] = NULL;
@@ -319,6 +353,7 @@ void bitopCommand(redisClient *c) {
             continue;
         }
         /* Return an error if one of the keys is not a string. */
+        //key类型不是string,报错
         if (checkType(c,o,REDIS_STRING)) {
             for (j = j-1; j >= 0; j--) {
                 if (objects[j])
@@ -355,6 +390,8 @@ void bitopCommand(redisClient *c) {
             memcpy(res,src[0],minlen);
 
             /* Different branches per different operations for speed (sorry). */
+
+            //对从0到minlen的字节，以sizeof(unsigned long)*4的字节大小为单位进行计算
             if (op == BITOP_AND) {
                 while(minlen >= sizeof(unsigned long)*4) {
                     for (i = 1; i < numkeys; i++) {
@@ -408,6 +445,7 @@ void bitopCommand(redisClient *c) {
         }
 
         /* j is set to the next byte to process by the previous loop. */
+        //计算minlen到maxlen的字节，以字节为单位计算
         for (; j < maxlen; j++) {
             output = (len[0] <= j) ? 0 : src[0][j];
             if (op == BITOP_NOT) output = ~output;
@@ -445,6 +483,7 @@ void bitopCommand(redisClient *c) {
 }
 
 /* BITCOUNT key [start end] */
+//bitcount命令的实现
 void bitcountCommand(redisClient *c) {
     robj *o;
     long start, end, strlen;
@@ -466,6 +505,7 @@ void bitcountCommand(redisClient *c) {
     }
 
     /* Parse start/end range if any. */
+    //解析start,end，并处理负数的情况
     if (c->argc == 4) {
         if (getLongFromObjectOrReply(c,c->argv[2],&start,NULL) != REDIS_OK)
             return;
@@ -499,6 +539,7 @@ void bitcountCommand(redisClient *c) {
 }
 
 /* BITPOS key bit [start [end]] */
+//bitops命令的实现
 void bitposCommand(redisClient *c) {
     robj *o;
     long bit, start, end, strlen;
@@ -508,6 +549,7 @@ void bitposCommand(redisClient *c) {
 
     /* Parse the bit argument to understand what we are looking for, set
      * or clear bits. */
+    //取到bit，如果不为0或1报错
     if (getLongFromObjectOrReply(c,c->argv[2],&bit,NULL) != REDIS_OK)
         return;
     if (bit != 0 && bit != 1) {
@@ -535,6 +577,7 @@ void bitposCommand(redisClient *c) {
     }
 
     /* Parse start/end range if any. */
+    //解析start,end的值，并处理负数的情况
     if (c->argc == 4 || c->argc == 5) {
         if (getLongFromObjectOrReply(c,c->argv[3],&start,NULL) != REDIS_OK)
             return;
@@ -576,6 +619,7 @@ void bitposCommand(redisClient *c) {
          * So if redisBitpos() returns the first bit outside the range,
          * we return -1 to the caller, to mean, in the specified range there
          * is not a single "0" bit. */
+        //bit为0,pos为(end-start+1)*8, 即找不到
         if (end_given && bit == 0 && pos == bytes*8) {
             addReplyLongLong(c,-1);
             return;
