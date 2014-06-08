@@ -28,14 +28,26 @@
  */
 
 /* Exported API */
+//初始化后台任务所需的上下文
 void bioInit(void);
+
+//创建一个后台任务
 void bioCreateBackgroundJob(int type, void *arg1, void *arg2, void *arg3);
+
+//操作线程运行的函数。根据操作类型从任务队列中取出任务并调用相关函数执行
 unsigned long long bioPendingJobsOfType(int type);
+
 void bioWaitPendingJobsLE(int type, unsigned long long num);
+
+//给定type,返回尚未运行的任务的数量
 time_t bioOlderJobOfType(int type);
+
+//杀死线程，目前redis只有在崩溃时才调用该函数
 void bioKillThreads(void);
 
 /* Background job opcodes */
+//目前有两种类型的任务，一是close操作，二是fsync操作。
+//这两种操作都花费大量时间，为了不阻塞主进程，将其以线程形式在后台执行
 #define REDIS_BIO_CLOSE_FILE    0 /* Deferred close(2) syscall. */
 #define REDIS_BIO_AOF_FSYNC     1 /* Deferred AOF fsync. */
 #define REDIS_BIO_NUM_OPS       2
