@@ -481,7 +481,7 @@ sds catAppendOnlyExpireAtCommand(sds buf, struct redisCommand *cmd, robj *key, r
     return buf;
 }
 
-//
+//将命令添加到aof的缓冲区
 void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int argc) {
     sds buf = sdsempty();
     robj *tmpargv[3];
@@ -543,9 +543,11 @@ void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int a
 
 /* In Redis commands are always executed in the context of a client, so in
  * order to load the append only file we need to create a fake client. */
+//创建一个假客户端来执行装载aof文件的命令
 struct redisClient *createFakeClient(void) {
     struct redisClient *c = zmalloc(sizeof(*c));
 
+    //初始化假客户端的数据
     selectDb(c,0);
     c->fd = -1;
     c->name = NULL;
@@ -568,6 +570,7 @@ struct redisClient *createFakeClient(void) {
     return c;
 }
 
+//销毁假客户端的结构体
 void freeFakeClient(struct redisClient *c) {
     sdsfree(c->querybuf);
     listRelease(c->reply);
@@ -576,9 +579,10 @@ void freeFakeClient(struct redisClient *c) {
     zfree(c);
 }
 
-/* Replay the append log file. On error REDIS_OK is returned. On non fatal
+/* Replay the append log file. On success REDIS_OK is returned. On non fatal
  * error (the append only file is zero-length) REDIS_ERR is returned. On
  * fatal error an error message is logged and the program exists. */
+//将aof文件记录的命令以假客户端重新执行
 int loadAppendOnlyFile(char *filename) {
     struct redisClient *fakeClient;
     FILE *fp = fopen(filename,"r");
@@ -586,12 +590,14 @@ int loadAppendOnlyFile(char *filename) {
     int old_aof_state = server.aof_state;
     long loops = 0;
 
+    //aof文件大小为0,报错
     if (fp && redis_fstat(fileno(fp),&sb) != -1 && sb.st_size == 0) {
         server.aof_current_size = 0;
         fclose(fp);
         return REDIS_ERR;
     }
 
+    //打开文件失败，记录到日志并推出程序
     if (fp == NULL) {
         redisLog(REDIS_WARNING,"Fatal error: can't open the append log file for reading: %s",strerror(errno));
         exit(1);
@@ -624,6 +630,7 @@ int loadAppendOnlyFile(char *filename) {
             else
                 goto readerr;
         }
+        //取到命令参数数量
         if (buf[0] != '*') goto fmterr;
         argc = atoi(buf+1);
         if (argc < 1) goto fmterr;
@@ -632,10 +639,13 @@ int loadAppendOnlyFile(char *filename) {
         for (j = 0; j < argc; j++) {
             if (fgets(buf,sizeof(buf),fp) == NULL) goto readerr;
             if (buf[0] != '$') goto fmterr;
+            //取到当前参数的长度
             len = strtol(buf+1,NULL,10);
             argsds = sdsnewlen(NULL,len);
+            //取到参数的内容
             if (len && fread(argsds,len,1,fp) == 0) goto fmterr;
             argv[j] = createObject(REDIS_STRING,argsds);
+            //跳过/r/n
             if (fread(buf,2,1,fp) == 0) goto fmterr; /* discard CRLF */
         }
 
@@ -664,6 +674,7 @@ int loadAppendOnlyFile(char *filename) {
 
     /* This point can only be reached when EOF is reached without errors.
      * If the client is in the middle of a MULTI/EXEC, log error and quit. */
+    //当正常读完aof文件，程序将到达这里
     if (fakeClient->flags & REDIS_MULTI) goto readerr;
 
     fclose(fp);
@@ -692,6 +703,7 @@ fmterr:
 
 /* Delegate writing an object to writing a bulk string or bulk long long.
  * This is not placed in rio.c since that adds the redis.h dependency. */
+//将redis object以longlong 或者string类型写到rio中
 int rioWriteBulkObject(rio *r, robj *obj) {
     /* Avoid using getDecodedObject to help copy-on-write (we are often
      * in a child process when this function is called). */
@@ -706,9 +718,11 @@ int rioWriteBulkObject(rio *r, robj *obj) {
 
 /* Emit the commands needed to rebuild a list object.
  * The function returns 0 on error, 1 on success. */
+//将重建一个list对象所需的命令写到rio中
 int rewriteListObject(rio *r, robj *key, robj *o) {
     long long count = 0, items = listTypeLength(o);
 
+    //list的编码是ziplist
     if (o->encoding == REDIS_ENCODING_ZIPLIST) {
         unsigned char *zl = o->ptr;
         unsigned char *p = ziplistIndex(zl,0);
@@ -716,15 +730,18 @@ int rewriteListObject(rio *r, robj *key, robj *o) {
         unsigned int vlen;
         long long vlong;
 
+        //遍历list的元素
         while(ziplistGet(p,&vstr,&vlen,&vlong)) {
             if (count == 0) {
                 int cmd_items = (items > REDIS_AOF_REWRITE_ITEMS_PER_CMD) ?
                     REDIS_AOF_REWRITE_ITEMS_PER_CMD : items;
-
+                //开始时，先将list长度+2, RPUSH, key写到rio
                 if (rioWriteBulkCount(r,'*',2+cmd_items) == 0) return 0;
                 if (rioWriteBulkString(r,"RPUSH",5) == 0) return 0;
                 if (rioWriteBulkObject(r,key) == 0) return 0;
             }
+
+            //将元素的值写到rio
             if (vstr) {
                 if (rioWriteBulkString(r,(char*)vstr,vlen) == 0) return 0;
             } else {
@@ -734,19 +751,22 @@ int rewriteListObject(rio *r, robj *key, robj *o) {
             if (++count == REDIS_AOF_REWRITE_ITEMS_PER_CMD) count = 0;
             items--;
         }
-    } else if (o->encoding == REDIS_ENCODING_LINKEDLIST) {
+    }
+    //adlist编码
+    else if (o->encoding == REDIS_ENCODING_LINKEDLIST) {
         list *list = o->ptr;
         listNode *ln;
         listIter li;
 
         listRewind(list,&li);
+        //遍历list中元素
         while((ln = listNext(&li))) {
             robj *eleobj = listNodeValue(ln);
 
             if (count == 0) {
                 int cmd_items = (items > REDIS_AOF_REWRITE_ITEMS_PER_CMD) ?
                     REDIS_AOF_REWRITE_ITEMS_PER_CMD : items;
-
+                //开始先将list长度+2, RPUSH, key写到rio
                 if (rioWriteBulkCount(r,'*',2+cmd_items) == 0) return 0;
                 if (rioWriteBulkString(r,"RPUSH",5) == 0) return 0;
                 if (rioWriteBulkObject(r,key) == 0) return 0;
@@ -763,6 +783,7 @@ int rewriteListObject(rio *r, robj *key, robj *o) {
 
 /* Emit the commands needed to rebuild a set object.
  * The function returns 0 on error, 1 on success. */
+//将重建一个set对象所需命令写到rio中
 int rewriteSetObject(rio *r, robj *key, robj *o) {
     long long count = 0, items = setTypeSize(o);
 
@@ -810,6 +831,7 @@ int rewriteSetObject(rio *r, robj *key, robj *o) {
 
 /* Emit the commands needed to rebuild a sorted set object.
  * The function returns 0 on error, 1 on success. */
+//将重建一个zset所需命令写到rio中
 int rewriteSortedSetObject(rio *r, robj *key, robj *o) {
     long long count = 0, items = zsetLength(o);
 
