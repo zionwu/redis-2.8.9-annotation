@@ -741,6 +741,7 @@ void sha1hex(char *digest, char *script, size_t len) {
     digest[40] = '\0';
 }
 
+//将lua的响应转化为redis的响应
 void luaReplyToRedisReply(redisClient *c, lua_State *lua) {
     int t = lua_type(lua,-1);
 
@@ -807,6 +808,7 @@ void luaReplyToRedisReply(redisClient *c, lua_State *lua) {
 
 /* Set an array of Redis String Objects as a Lua array (table) stored into a
  * global variable. */
+//将一组redis字符串对象转化为lua数组并保存矜全局变量中
 void luaSetGlobalArray(lua_State *lua, char *var, robj **elev, int elec) {
     int j;
 
@@ -827,6 +829,7 @@ void luaSetGlobalArray(lua_State *lua, char *var, robj **elev, int elec) {
  * On success REDIS_OK is returned, and nothing is left on the Lua stack.
  * On error REDIS_ERR is returned and an appropriate error is set in the
  * client context. */
+//创建一个lua的函数
 int luaCreateFunction(redisClient *c, lua_State *lua, char *funcname, robj *body) {
     sds funcdef = sdsempty();
 
@@ -863,6 +866,7 @@ int luaCreateFunction(redisClient *c, lua_State *lua, char *funcname, robj *body
     return REDIS_OK;
 }
 
+//通用函数，实现了eval和evalsha命令
 void evalGenericCommand(redisClient *c, int evalsha) {
     lua_State *lua = server.lua;
     char funcname[43];
@@ -897,9 +901,11 @@ void evalGenericCommand(redisClient *c, int evalsha) {
     funcname[0] = 'f';
     funcname[1] = '_';
     if (!evalsha) {
+    	//eval是计算函数的sha
         /* Hash the code if this is an EVAL call */
         sha1hex(funcname+2,c->argv[1]->ptr,sdslen(c->argv[1]->ptr));
     } else {
+    	//evalsha，从参数取出sha
         /* We already have the SHA if it is a EVALSHA */
         int j;
         char *sha = c->argv[1]->ptr;
@@ -913,6 +919,7 @@ void evalGenericCommand(redisClient *c, int evalsha) {
     lua_getglobal(lua, "__redis__err__handler");
 
     /* Try to lookup the Lua function */
+    //在Lua环境中找到函数
     lua_getglobal(lua, funcname);
     if (lua_isnil(lua,-1)) {
         lua_pop(lua,1); /* remove the nil from the stack */
@@ -958,6 +965,7 @@ void evalGenericCommand(redisClient *c, int evalsha) {
     /* At this point whether this script was never seen before or if it was
      * already defined, we can call it. We have zero arguments and expect
      * a single return value. */
+    //调用函数
     err = lua_pcall(lua,0,1,-2);
 
     /* Perform some cleanup that we need to do both on error and success. */
@@ -1011,10 +1019,12 @@ void evalGenericCommand(redisClient *c, int evalsha) {
     }
 }
 
+//eval命令的实现
 void evalCommand(redisClient *c) {
     evalGenericCommand(c,0);
 }
 
+//evalsha命令的实现
 void evalShaCommand(redisClient *c) {
     if (sdslen(c->argv[1]->ptr) != 40) {
         /* We know that a match is not possible if the provided SHA is
@@ -1069,7 +1079,7 @@ int redis_math_randomseed (lua_State *L) {
 /* ---------------------------------------------------------------------------
  * SCRIPT command for script environment introspection and control
  * ------------------------------------------------------------------------- */
-
+//script命令的实现
 void scriptCommand(redisClient *c) {
     if (c->argc == 2 && !strcasecmp(c->argv[1]->ptr,"flush")) {
         scriptingReset();
