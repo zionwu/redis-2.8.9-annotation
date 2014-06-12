@@ -49,6 +49,7 @@
  * "add" digests relative to unordered elements.
  *
  * So digest(a,b,c,d) will be the same of digest(b,a,c,d) */
+//计算ptr的sha,并且与digest做xor操作
 void xorDigest(unsigned char *digest, void *ptr, size_t len) {
     SHA1_CTX ctx;
     unsigned char hash[20], *s = ptr;
@@ -62,6 +63,7 @@ void xorDigest(unsigned char *digest, void *ptr, size_t len) {
         digest[j] ^= hash[j];
 }
 
+//计算robj的sha,并且与digest做xor操作
 void xorObjectDigest(unsigned char *digest, robj *o) {
     o = getDecodedObject(o);
     xorDigest(digest,o->ptr,sdslen(o->ptr));
@@ -82,6 +84,7 @@ void xorObjectDigest(unsigned char *digest, robj *o) {
  * Also note that mixdigest("foo") followed by mixdigest("bar")
  * will lead to a different digest compared to "fo", "obar".
  */
+//计算SHA1(digest xor SHA1(data))
 void mixDigest(unsigned char *digest, void *ptr, size_t len) {
     SHA1_CTX ctx;
     char *s = ptr;
@@ -92,6 +95,7 @@ void mixDigest(unsigned char *digest, void *ptr, size_t len) {
     SHA1Final(digest,&ctx);
 }
 
+//计算SHA1(digest xor SHA1(robj))
 void mixObjectDigest(unsigned char *digest, robj *o) {
     o = getDecodedObject(o);
     mixDigest(digest,o->ptr,sdslen(o->ptr));
@@ -104,6 +108,7 @@ void mixObjectDigest(unsigned char *digest, robj *o) {
  * the result. For list instead we use a feedback entering the output digest
  * as input in order to ensure that a different ordered list will result in
  * a different digest. */
+//计算一个数据集的sha
 void computeDatasetDigest(unsigned char *final) {
     unsigned char digest[20];
     char buf[128];
@@ -114,6 +119,7 @@ void computeDatasetDigest(unsigned char *final) {
 
     memset(final,0,20); /* Start with a clean result */
 
+    // 遍历所有db
     for (j = 0; j < server.dbnum; j++) {
         redisDb *db = server.db+j;
 
@@ -122,10 +128,12 @@ void computeDatasetDigest(unsigned char *final) {
 
         /* hash the DB id, so the same dataset moved in a different
          * DB will lead to a different digest */
+        //计算db id的sha
         aux = htonl(j);
         mixDigest(final,&aux,sizeof(aux));
 
         /* Iterate this DB writing every entry */
+        //遍历db中所有写操作
         while((de = dictNext(di)) != NULL) {
             sds key;
             robj *keyobj, *o;
@@ -135,35 +143,46 @@ void computeDatasetDigest(unsigned char *final) {
             key = dictGetKey(de);
             keyobj = createStringObject(key,sdslen(key));
 
+            //添加key到digest中
             mixDigest(digest,key,sdslen(key));
 
             o = dictGetVal(de);
 
+            //添加key的类型到digest中
             aux = htonl(o->type);
             mixDigest(digest,&aux,sizeof(aux));
             expiretime = getExpire(db,keyobj);
 
             /* Save the key and associated value */
+            //将string添加到digest
             if (o->type == REDIS_STRING) {
                 mixObjectDigest(digest,o);
-            } else if (o->type == REDIS_LIST) {
+            }
+            //将list的元素添加到digest
+            else if (o->type == REDIS_LIST) {
                 listTypeIterator *li = listTypeInitIterator(o,0,REDIS_TAIL);
                 listTypeEntry entry;
                 while(listTypeNext(li,&entry)) {
                     robj *eleobj = listTypeGet(&entry);
+                    //采用与顺序相关的计算，因为list中的元素有顺序
                     mixObjectDigest(digest,eleobj);
                     decrRefCount(eleobj);
                 }
                 listTypeReleaseIterator(li);
-            } else if (o->type == REDIS_SET) {
+            }
+            //将set的元素添加到digest
+            else if (o->type == REDIS_SET) {
                 setTypeIterator *si = setTypeInitIterator(o);
                 robj *ele;
                 while((ele = setTypeNextObject(si)) != NULL) {
+                	//采用与顺序无关的计算
                     xorObjectDigest(digest,ele);
                     decrRefCount(ele);
                 }
                 setTypeReleaseIterator(si);
-            } else if (o->type == REDIS_ZSET) {
+            }
+            //将zset的元素添加到digest
+            else if (o->type == REDIS_ZSET) {
                 unsigned char eledigest[20];
 
                 if (o->encoding == REDIS_ENCODING_ZIPLIST) {
@@ -215,7 +234,9 @@ void computeDatasetDigest(unsigned char *final) {
                 } else {
                     redisPanic("Unknown sorted set encoding");
                 }
-            } else if (o->type == REDIS_HASH) {
+            }
+            //将hash的元素添加到digest
+            else if (o->type == REDIS_HASH) {
                 hashTypeIterator *hi;
                 robj *obj;
 
@@ -246,6 +267,7 @@ void computeDatasetDigest(unsigned char *final) {
     }
 }
 
+//debug命令的实现
 void debugCommand(redisClient *c) {
     if (!strcasecmp(c->argv[1]->ptr,"segfault")) {
         *((char*)-1) = 'x';
@@ -377,7 +399,7 @@ void debugCommand(redisClient *c) {
 }
 
 /* =========================== Crash handling  ============================== */
-
+//redis版assert
 void _redisAssert(char *estr, char *file, int line) {
     bugReportStart();
     redisLog(REDIS_WARNING,"=== ASSERTION FAILED ===");
@@ -388,9 +410,12 @@ void _redisAssert(char *estr, char *file, int line) {
     server.assert_line = line;
     redisLog(REDIS_WARNING,"(forcing SIGSEGV to print the bug report.)");
 #endif
+
+    //segment fault导致程序崩溃？
     *((char*)-1) = 'x';
 }
 
+//将客户端信息记录到日志
 void _redisAssertPrintClientInfo(redisClient *c) {
     int j;
 
@@ -417,6 +442,7 @@ void _redisAssertPrintClientInfo(redisClient *c) {
     }
 }
 
+//将robj的信息记录到日志
 void redisLogObjectDebugInfo(robj *o) {
     redisLog(REDIS_WARNING,"Object type: %d", o->type);
     redisLog(REDIS_WARNING,"Object encoding: %d", o->encoding);
@@ -447,12 +473,14 @@ void _redisAssertPrintObject(robj *o) {
     redisLogObjectDebugInfo(o);
 }
 
+//将客户端和robj信息添加到日志
 void _redisAssertWithInfo(redisClient *c, robj *o, char *estr, char *file, int line) {
     if (c) _redisAssertPrintClientInfo(c);
     if (o) _redisAssertPrintObject(o);
     _redisAssert(estr,file,line);
 }
 
+//添加panic信息到日志
 void _redisPanic(char *msg, char *file, int line) {
     bugReportStart();
     redisLog(REDIS_WARNING,"------------------------------------------------");
@@ -465,6 +493,7 @@ void _redisPanic(char *msg, char *file, int line) {
     *((char*)-1) = 'x';
 }
 
+//开启日志记录
 void bugReportStart(void) {
     if (server.bug_report_start == 0) {
         redisLog(REDIS_WARNING,
@@ -505,6 +534,7 @@ static void *getMcontextEip(ucontext_t *uc) {
 #endif
 }
 
+//记录栈的信息
 void logStackContent(void **sp) {
     int i;
     for (i = 15; i >= 0; i--) {
@@ -518,6 +548,7 @@ void logStackContent(void **sp) {
     }
 }
 
+//记录寄存器的内容到日志上
 void logRegisters(ucontext_t *uc) {
     redisLog(REDIS_WARNING, "--- REGISTERS");
 
@@ -649,6 +680,7 @@ void logRegisters(ucontext_t *uc) {
 
 /* Logs the stack trace using the backtrace() call. This function is designed
  * to be called from signal handlers safely. */
+//调用backtrace函数记录栈信息到日志
 void logStackTrace(ucontext_t *uc) {
     void *trace[100];
     int trace_size = 0, fd;
@@ -677,6 +709,7 @@ void logStackTrace(ucontext_t *uc) {
 /* Log information about the "current" client, that is, the client that is
  * currently being served by Redis. May be NULL if Redis is not serving a
  * client right now. */
+//记录当前客户端信息到日志
 void logCurrentClient(void) {
     if (server.current_client == NULL) return;
 
