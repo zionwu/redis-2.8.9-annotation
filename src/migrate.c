@@ -7,14 +7,18 @@
 
 /* Generates a DUMP-format representation of the object 'o', adding it to the
  * io stream pointed by 'rio'. This function can't fail. */
+//将给定的robj以固定格式写到rio中
 void createDumpPayload(rio *payload, robj *o) {
     unsigned char buf[2];
     uint64_t crc;
 
     /* Serialize the object in a RDB-like format. It consist of an object type
      * byte followed by the serialized object. This is understood by RESTORE. */
+    //初始化rio
     rioInitWithBuffer(payload,sdsempty());
+    //保存类型
     redisAssert(rdbSaveObjectType(payload,o));
+    //保存对象
     redisAssert(rdbSaveObject(payload,o));
 
     /* Write the footer, this is how it looks like:
@@ -27,12 +31,14 @@ void createDumpPayload(rio *payload, robj *o) {
     /* RDB version */
     buf[0] = REDIS_RDB_VERSION & 0xff;
     buf[1] = (REDIS_RDB_VERSION >> 8) & 0xff;
+    //保存版本
     payload->io.buffer.ptr = sdscatlen(payload->io.buffer.ptr,buf,2);
 
     /* CRC64 */
     crc = crc64(0,(unsigned char*)payload->io.buffer.ptr,
                 sdslen(payload->io.buffer.ptr));
     memrev64ifbe(&crc);
+    //保存crc
     payload->io.buffer.ptr = sdscatlen(payload->io.buffer.ptr,&crc,8);
 }
 
@@ -40,6 +46,7 @@ void createDumpPayload(rio *payload, robj *o) {
  * instance and that the checksum is ok.
  * If the DUMP payload looks valid REDIS_OK is returned, otherwise REDIS_ERR
  * is returned. */
+//检查rbd的版本和crc64的正确性
 int verifyDumpPayload(unsigned char *p, size_t len) {
     unsigned char *footer;
     uint16_t rdbver;
@@ -50,10 +57,12 @@ int verifyDumpPayload(unsigned char *p, size_t len) {
     footer = p+(len-10);
 
     /* Verify RDB version */
+    //验证rbd版本
     rdbver = (footer[1] << 8) | footer[0];
     if (rdbver != REDIS_RDB_VERSION) return REDIS_ERR;
 
     /* Verify CRC64 */
+    //验证数据的crc
     crc = crc64(0,p,len-8);
     memrev64ifbe(&crc);
     return (memcmp(&crc,footer+2,8) == 0) ? REDIS_OK : REDIS_ERR;
@@ -62,6 +71,7 @@ int verifyDumpPayload(unsigned char *p, size_t len) {
 /* DUMP keyname
  * DUMP is actually not used by Redis Cluster but it is the obvious
  * complement of RESTORE and can be useful for different applications. */
+//dump命令的实现
 void dumpCommand(redisClient *c) {
     robj *o, *dumpobj;
     rio payload;
@@ -83,6 +93,7 @@ void dumpCommand(redisClient *c) {
 }
 
 /* RESTORE key ttl serialized-value */
+//restore命令的实现
 void restoreCommand(redisClient *c) {
     long long ttl;
     rio payload;
@@ -96,6 +107,7 @@ void restoreCommand(redisClient *c) {
     }
 
     /* Check if the TTL value makes sense */
+    //验证ttl是否有效
     if (getLongLongFromObjectOrReply(c,c->argv[2],&ttl,NULL) != REDIS_OK) {
         return;
     } else if (ttl < 0) {
@@ -104,6 +116,7 @@ void restoreCommand(redisClient *c) {
     }
 
     /* Verify RDB version and data checksum. */
+    //验证RDB版本和数据校验和有效
     if (verifyDumpPayload(c->argv[3]->ptr,sdslen(c->argv[3]->ptr)) == REDIS_ERR)
     {
         addReplyError(c,"DUMP payload version or checksum are wrong");
@@ -111,6 +124,7 @@ void restoreCommand(redisClient *c) {
     }
 
     rioInitWithBuffer(&payload,c->argv[3]->ptr);
+    //调用RDB的API从数据中恢复出robj
     if (((type = rdbLoadObjectType(&payload)) == -1) ||
         ((obj = rdbLoadObject(type,&payload)) == NULL))
     {
@@ -119,6 +133,7 @@ void restoreCommand(redisClient *c) {
     }
 
     /* Create the key and set the TTL if any */
+    //将key添加到db中
     dbAdd(c->db,c->argv[1],obj);
     if (ttl) setExpire(c->db,c->argv[1],mstime()+ttl);
     signalModifiedKey(c->db,c->argv[1]);
@@ -127,6 +142,7 @@ void restoreCommand(redisClient *c) {
 }
 
 /* MIGRATE host port key dbid timeout */
+//migrate命令的实现
 void migrateCommand(redisClient *c) {
     int fd;
     long timeout;
@@ -151,6 +167,7 @@ void migrateCommand(redisClient *c) {
     }
     
     /* Connect */
+    //连接到给定host的端口
     fd = anetTcpNonBlockConnect(server.neterr,c->argv[1]->ptr,
                 atoi(c->argv[2]->ptr));
     if (fd == -1) {
@@ -158,13 +175,17 @@ void migrateCommand(redisClient *c) {
             server.neterr);
         return;
     }
+
+    //等待该套接字可写
     if ((aeWait(fd,AE_WRITABLE,timeout*1000) & AE_WRITABLE) == 0) {
         addReplySds(c,sdsnew("-IOERR error or timeout connecting to the client\r\n"));
         return;
     }
 
     /* Create RESTORE payload and generate the protocol to call the command. */
+    //将恢复该key的restore命令的形式写到rio中
     rioInitWithBuffer(&cmd,sdsempty());
+    //写进 "*2\r\n$6\r\nSELECT\r\n$len\r\ndbid\r\n"
     redisAssertWithInfo(c,NULL,rioWriteBulkCount(&cmd,'*',2));
     redisAssertWithInfo(c,NULL,rioWriteBulkString(&cmd,"SELECT",6));
     redisAssertWithInfo(c,NULL,rioWriteBulkLongLong(&cmd,dbid));
@@ -174,6 +195,8 @@ void migrateCommand(redisClient *c) {
         ttl = expireat-mstime();
         if (ttl < 1) ttl = 1;
     }
+
+    //写进“*4\r\n$7\r\nRESTORE\r\n$kenlen\r\nkey\r\n$ttllen\r\nttl\r\n”
     redisAssertWithInfo(c,NULL,rioWriteBulkCount(&cmd,'*',4));
     redisAssertWithInfo(c,NULL,rioWriteBulkString(&cmd,"RESTORE",7));
     redisAssertWithInfo(c,NULL,c->argv[3]->encoding == REDIS_ENCODING_RAW);
@@ -182,18 +205,22 @@ void migrateCommand(redisClient *c) {
 
     /* Finally the last argument that is the serailized object payload
      * in the DUMP format. */
+    //将key的数据以RDB形式存到缓冲区中
     createDumpPayload(&payload,o);
+    //将缓冲区写到rio
     redisAssertWithInfo(c,NULL,rioWriteBulkString(&cmd,payload.io.buffer.ptr,
                                 sdslen(payload.io.buffer.ptr)));
     sdsfree(payload.io.buffer.ptr);
 
     /* Tranfer the query to the other node in 64K chunks. */
+    //将rio缓冲区数据写到socket中
     {
         sds buf = cmd.io.buffer.ptr;
         size_t pos = 0, towrite;
         int nwritten = 0;
 
         while ((towrite = sdslen(buf)-pos) > 0) {
+        	//每次最多写64KB
             towrite = (towrite > (64*1024) ? (64*1024) : towrite);
             nwritten = syncWrite(fd,buf+pos,towrite,timeout);
             if (nwritten != (signed)towrite) goto socket_wr_err;
@@ -202,6 +229,7 @@ void migrateCommand(redisClient *c) {
     }
 
     /* Read back the reply. */
+    //从套接字中读出响应
     {
         char buf1[1024];
         char buf2[1024];
