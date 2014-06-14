@@ -91,24 +91,61 @@
 #define REDIS_RDB_OPCODE_SELECTDB   254
 #define REDIS_RDB_OPCODE_EOF        255
 
+//将type写到rdb中
 int rdbSaveType(rio *rdb, unsigned char type);
+
+//从rdb中取出类型
 int rdbLoadType(rio *rdb);
+
+
 int rdbSaveTime(rio *rdb, time_t t);
+
+//从rdb中取出时间
 time_t rdbLoadTime(rio *rdb);
+
+//将长度len保存到rdb
 int rdbSaveLen(rio *rdb, uint32_t len);
+
+//从rdb将长度读出
 uint32_t rdbLoadLen(rio *rdb, int *isencoded);
+
+//保存robj的type字段到rdb
 int rdbSaveObjectType(rio *rdb, robj *o);
+
+//从rdb中读出robj的类型字段
 int rdbLoadObjectType(rio *rdb);
+
+//从rdb文件中读取数据,创建成key保存在服务器
 int rdbLoad(char *filename);
+
+//以子进程执行保存rdb的操作
 int rdbSaveBackground(char *filename);
+
+//移除临时文件
 void rdbRemoveTempFile(pid_t childpid);
+
+//将服务器的数据以rdb形式保存到硬盘中给定文件
 int rdbSave(char *filename);
+
+//将一个robj对象保存到rdb中
 int rdbSaveObject(rio *rdb, robj *o);
+
+//返回robj保存在rdb中占用内存长度
 off_t rdbSavedObjectLen(robj *o);
+
+//从rdb中读取给定类型的robj
 off_t rdbSavedObjectPages(robj *o);
+
+//从rdb中读取给定类型的robj
 robj *rdbLoadObject(int type, rio *rdb);
+
+//在后台进程完成保存rdb后的处理函数
 void backgroundSaveDoneHandler(int exitcode, int bysignal);
+
+//将给定键的类型，名字和值写进rdb
 int rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val, long long expiretime, long long now);
+
+//从rdb读出redis string object
 robj *rdbLoadStringObject(rio *rdb);
 
 #endif
