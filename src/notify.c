@@ -37,22 +37,34 @@
  *
  * The function returns -1 if the input contains characters not mapping to
  * any class. */
+//将classes中的字符转换为flags
 int keyspaceEventsStringToFlags(char *classes) {
     char *p = classes;
     int c, flags = 0;
 
     while((c = *p++) != '\0') {
         switch(c) {
+        //参数 g$lshzxe 的别名
         case 'A': flags |= REDIS_NOTIFY_ALL; break;
+        //DEL 、 EXPIRE 、 RENAME 等类型无关的通用命令的通知
         case 'g': flags |= REDIS_NOTIFY_GENERIC; break;
+        //字符串命令的通知
         case '$': flags |= REDIS_NOTIFY_STRING; break;
+        //列表命令的通知
         case 'l': flags |= REDIS_NOTIFY_LIST; break;
+        //集合命令的通知
         case 's': flags |= REDIS_NOTIFY_SET; break;
+        //哈希命令的通知
         case 'h': flags |= REDIS_NOTIFY_HASH; break;
+        //有序集合命令的通知
         case 'z': flags |= REDIS_NOTIFY_ZSET; break;
+        //过期事件：每当有过期键被删除时发送
         case 'x': flags |= REDIS_NOTIFY_EXPIRED; break;
+        //驱逐(evict)事件：每当有键因为 maxmemory 政策而被删除时发送
         case 'e': flags |= REDIS_NOTIFY_EVICTED; break;
+        //键空间通知，所有通知以 __keyspace@<db>__ 为前缀
         case 'K': flags |= REDIS_NOTIFY_KEYSPACE; break;
+        //键事件通知，所有通知以 __keyevent@<db>__ 为前缀
         case 'E': flags |= REDIS_NOTIFY_KEYEVENT; break;
         default: return -1;
         }
@@ -64,6 +76,7 @@ int keyspaceEventsStringToFlags(char *classes) {
  * as input an integer with the xored flags and returns a string representing
  * the selected classes. The string returned is an sds string that needs to
  * be released with sdsfree(). */
+//将flags转换为字符表示形式
 sds keyspaceEventsFlagsToString(int flags) {
     sds res;
 
@@ -92,6 +105,7 @@ sds keyspaceEventsFlagsToString(int flags) {
  * 'event' is a C string representing the event name.
  * 'key' is a Redis object representing the key name.
  * 'dbid' is the database ID where the key lives.  */
+//实现通知功能。该功能使得客户端可以通过订阅频道或模式，来接收那些以某种方式改动了Redis数据集的事件。
 void notifyKeyspaceEvent(int type, char *event, robj *key, int dbid) {
     sds chan;
     robj *chanobj, *eventobj;
@@ -104,6 +118,7 @@ void notifyKeyspaceEvent(int type, char *event, robj *key, int dbid) {
     eventobj = createStringObject(event,strlen(event));
 
     /* __keyspace@<db>__:<key> <event> notifications. */
+    //键空间通知。每个键有一个频道，往频道发送发送事件的消息
     if (server.notify_keyspace_events & REDIS_NOTIFY_KEYSPACE) {
         chan = sdsnewlen("__keyspace@",11);
         len = ll2string(buf,sizeof(buf),dbid);
@@ -111,11 +126,13 @@ void notifyKeyspaceEvent(int type, char *event, robj *key, int dbid) {
         chan = sdscatlen(chan, "__:", 3);
         chan = sdscatsds(chan, key->ptr);
         chanobj = createObject(REDIS_STRING, chan);
+        //发布消息
         pubsubPublishMessage(chanobj, eventobj);
         decrRefCount(chanobj);
     }
 
     /* __keyevente@<db>__:<event> <key> notifications. */
+    //键事件通知。每个事件有个频道，往频道发送事件发送的键
     if (server.notify_keyspace_events & REDIS_NOTIFY_KEYEVENT) {
         chan = sdsnewlen("__keyevent@",11);
         if (len == -1) len = ll2string(buf,sizeof(buf),dbid);
