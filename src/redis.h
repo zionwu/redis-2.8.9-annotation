@@ -63,10 +63,12 @@
 #include "util.h"    /* Misc functions useful in many places */
 
 /* Error codes */
+//错误标识码
 #define REDIS_OK                0
 #define REDIS_ERR               -1
 
 /* Static server configuration */
+//服务器默认配置
 #define REDIS_DEFAULT_HZ        10      /* Time interrupt calls/sec. */
 #define REDIS_MIN_HZ            1
 #define REDIS_MAX_HZ            500 
@@ -132,6 +134,7 @@
 #define ACTIVE_EXPIRE_CYCLE_FAST 1
 
 /* Protocol and I/O related defines */
+//IO相关的属性的默认值
 #define REDIS_MAX_QUERYBUF_LEN  (1024*1024*1024) /* 1GB max query buffer. */
 #define REDIS_IOBUF_LEN         (1024*16)  /* Generic I/O buffer size */
 #define REDIS_REPLY_CHUNK_BYTES (16*1024) /* 16k output buffer */
@@ -149,6 +152,7 @@
 
 /* Command flags. Please check the command table defined in the redis.c file
  * for more information about the meaning of every flag. */
+//表示命令属性的值
 #define REDIS_CMD_WRITE 1                   /* "w" flag */
 #define REDIS_CMD_READONLY 2                /* "r" flag */
 #define REDIS_CMD_DENYOOM 4                 /* "m" flag */
@@ -163,6 +167,7 @@
 #define REDIS_CMD_SKIP_MONITOR 2048         /* "M" flag */
 
 /* Object types */
+//redis中5种对象的类型值
 #define REDIS_STRING 0
 #define REDIS_LIST 1
 #define REDIS_SET 2
@@ -172,6 +177,7 @@
 /* Objects encoding. Some kind of objects like Strings and Hashes can be
  * internally represented in multiple ways. The 'encoding' field of the object
  * is set to one of this fields for this object. */
+ //redis中使用的8种数据结构的类型值
 #define REDIS_ENCODING_RAW 0     /* Raw representation */
 #define REDIS_ENCODING_INT 1     /* Encoded as integer */
 #define REDIS_ENCODING_HT 2      /* Encoded as hash table */
@@ -194,6 +200,7 @@
  *
  * Lengths up to 63 are stored using a single byte, most DB keys, and may
  * values, will fit inside. */
+ //RDB中第一个字节前两位表示编码的类型码
 #define REDIS_RDB_6BITLEN 0
 #define REDIS_RDB_14BITLEN 1
 #define REDIS_RDB_32BITLEN 2
@@ -203,17 +210,20 @@
 /* When a length of a string object stored on disk has the first two bits
  * set, the remaining two bits specify a special encoding for the object
  * accordingly to the following defines: */
+ //RDB中如果第一个字节前两位是REDIS_RDB_ENCVAL(11),那么后六位中保存的编码类型
 #define REDIS_RDB_ENC_INT8 0        /* 8 bit signed integer */
 #define REDIS_RDB_ENC_INT16 1       /* 16 bit signed integer */
 #define REDIS_RDB_ENC_INT32 2       /* 32 bit signed integer */
 #define REDIS_RDB_ENC_LZF 3         /* string compressed with FASTLZ */
 
 /* AOF states */
+//AOF的状态码
 #define REDIS_AOF_OFF 0             /* AOF is off */
 #define REDIS_AOF_ON 1              /* AOF is on */
 #define REDIS_AOF_WAIT_REWRITE 2    /* AOF waits rewrite to start appending */
 
 /* Client flags */
+//客户端相关属性的类型码
 #define REDIS_SLAVE (1<<0)   /* This client is a slave server */
 #define REDIS_MASTER (1<<1)  /* This client is a master server */
 #define REDIS_MONITOR (1<<2) /* This client is a slave monitor, see MONITOR */
@@ -234,17 +244,20 @@
 #define REDIS_PRE_PSYNC (1<<16)   /* Instance don't understand PSYNC. */
 
 /* Client request types */
+//客户端请求的类型
 #define REDIS_REQ_INLINE 1
 #define REDIS_REQ_MULTIBULK 2
 
 /* Client classes for client limits, currently used only for
  * the max-client-output-buffer limit implementation. */
+ //不同类型的客户端的限制类型
 #define REDIS_CLIENT_LIMIT_CLASS_NORMAL 0
 #define REDIS_CLIENT_LIMIT_CLASS_SLAVE 1
 #define REDIS_CLIENT_LIMIT_CLASS_PUBSUB 2
 #define REDIS_CLIENT_LIMIT_NUM_CLASSES 3
 
 /* Slave replication state - from the point of view of the slave. */
+//从服务器复制的状态码
 #define REDIS_REPL_NONE 0 /* No active replication */
 #define REDIS_REPL_CONNECT 1 /* Must connect to master */
 #define REDIS_REPL_CONNECTING 2 /* Connecting to master */
